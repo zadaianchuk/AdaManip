@@ -1,6 +1,6 @@
 # AdaManip
 
-This is the official codebase for **"AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning"** (ICLR 2025)
+This is the official codebase for [**"AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning"** (ICLR 2025)](https://arxiv.org/abs/2502.11124)
 
 ## Setup
 
@@ -56,19 +56,19 @@ All scripts for data collection, policy training, and evaluation are provided in
 ### Data Collection
 
 ```sh
-sh scripts/collect_mv.sh
+sh scripts/microwave/collect_mv.sh
 ```
 
 ### Policy Training
 
 ```sh
-sh scripts/diffusion_train_mv_manip.sh
+sh scripts/microwave/diffusion_train_mv_manip.sh
 ```
 
 ### Evaluation
 
 ```sh
-sh scripts/eval_mv_model.sh
+sh scripts/microwave/eval_mv_model.sh
 ```
 
 Note: Configuration files are located in the **cfg** folder. Please ensure the model checkpoint path is correctly set before running evaluation.
