@@ -1,29 +1,92 @@
-# Installation
+# AdaManip
+
+This is the official codebase for **"AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning"** (ICLR 2025)
+
+## Setup
+
+1. **Create a Conda environment**
+
+```sh
 conda create -n adamanip python=3.8
+conda activate adamanip
+```
 
+2. **Install PyTorch & IsaacGym**
+
+```sh
 pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
+```
 
-Install IsaacGym
+Download IsaacGym from [Nvidia Website](https://developer.nvidia.com/isaac-gym/download]) and Install the package following the instructions of the official [documentation](https://docs.robotsfan.com/isaacgym/install.html).
 
-Install pointnet++
+3. **Install Pointnet++ & pytorch3d**
 
-pip install numpy==1.23.5
++ Install [Pointnet2_Pytorch](https://github.com/erikwijmans/Pointnet2_PyTorch) following its instructions.
++ Git clone the [pytorch3d](https://github.com/facebookresearch/pytorch3d) and install it locally.
 
-Install pytorch3d
-
+```sh
 git clone https://github.com/facebookresearch/pytorch3d.git
 cd pytorch3d && pip install -e .
+```
 
-pip install plotly
+4. **Install other dependencies**
 
-pip install zarr, ipdb, open3d
+```sh
+pip install -r requirements.txt
+```
 
-pip install diffusers==0.11.1
+## Download Assets
 
-pip install huggingface-hub==0.24.0
+Download all assets from this [Google Drive link](https://drive.google.com/drive/folders/1ho2wSdd9hWNb6XuwVnFVkUakdNqVKXmb?usp=sharing). 
 
-pip install einops
+Place the downloaded `assets` folder in the root directory of this repository:
 
-ToDo:
-1. cuda device debug
-2. argument add cuda choice
+```
+AdaManip/
+├── assets/
+├── scripts/
+├── cfg/
+├── ...
+```
+
+## Run Experiments
+
+All scripts for data collection, policy training, and evaluation are provided in the `scripts` folder. The following example demonstrates usage with the open microwave task:
+
+### Data Collection
+
+```sh
+sh scripts/collect_mv.sh
+```
+
+### Policy Training
+
+```sh
+sh scripts/diffusion_train_mv_manip.sh
+```
+
+### Evaluation
+
+```sh
+sh scripts/eval_mv_model.sh
+```
+
+Note: Configuration files are located in the **cfg** folder. Please ensure the model checkpoint path is correctly set before running evaluation.
+
+## BibTeX
+
+If you found AdaManip useful, please consider citing:
+
+```tex
+@inproceedings{wang2025adamanip,
+    title={AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning},
+    author={Wang, Yuanfei and Zhang, Xiaojie and Wu, Ruihai and Li, Yu and Shen, Yan and Wu, Mingdong and He, Zhaofeng and Wang, Yizhou and Dong, Hao},
+    booktitle={International Conference on Learning Representations},
+    year={2025},
+    url={https://openreview.net/forum?id=Luss2sa0vc}
+  }
+```
+
+## Contact
+
+If you have any suggestion or questions, please get in touch at yuanfei_wang@pku.edu.cn
