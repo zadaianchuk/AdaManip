@@ -1,6 +1,6 @@
 # AdaManip
 
-This is the official codebase for [**"AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning"** (ICLR 2025)](https://arxiv.org/abs/2502.11124)
+This is the official codebase for [**AdaManip: Adaptive Articulated Object Manipulation Environments and Policy Learning** (ICLR 2025)](https://arxiv.org/abs/2502.11124)
 
 ## Setup
 
