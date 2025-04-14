@@ -1,0 +1,1 @@
+python run.py --task=OpenLamp --controller=ModelController --manipulation=OpenLampManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/lamp/open_lamp_model.yaml

@@ -1,0 +1,11 @@
+*.pyc
+.vscode
+assets/*
+logs/*
+demo_data/*
+results/*
+pcd/*
+ckpt/*
+seg_real.py
+sample_real.py
+real_pc_visual.py

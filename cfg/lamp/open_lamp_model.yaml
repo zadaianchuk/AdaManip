@@ -1,0 +1,129 @@
+task:
+  task_name: "open_lamp"
+  policy: "adaptive"
+  num_episode: 20
+  num_eval_episode: 10
+  max_step: 10
+
+model:
+  obs_horizon: 2
+  action_horizon: 1
+  pred_horizon: 4
+  num_diffusion_iters: 100
+  discrete: False
+  input_feat: 3
+  feat_dim: 128
+  dof_dim: 0
+  action_dim: 9 
+  Transformer: False
+
+  grasp: True 
+  grasp_model_path: './ckpt/lamp/lamp_grasp.pth'
+  diffusion_model_path:  './ckpt/lamp/lamp_manip.pth'
+
+
+env:
+  env_name: "open lamp"
+  numEnvs: 7
+  numObservations: 26
+  numActions: 9
+  envSpacing: 2.0
+  horizon: 30
+  clockwise: 0.5
+  actionSpeedScale: 20
+  enableDebugVis: False
+
+  enableCameraSensors: True
+  enableForceSensors: False
+
+  collectData: True
+  collectPC: False
+  collectForce: True
+  visualizePointcloud: False
+  PointDownSampleNum: 4096
+
+  reset:
+    bottle:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+    franka:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+
+  driveMode: "osc"
+  clipObservations: 5.0
+  clipActions: 1.0
+  cam: 
+    width: 512
+    height: 512
+    cam_far_plane: 100
+    cam_near_plane: 0.01
+    cam_horizontal_fov: 85
+    cam_start:
+      - [0.3, -0.3, 0.8]
+      - [0.3, 0.3, 0.8]
+      # - [-0.1, -0.17, 0.5]
+    cam_target: 
+      - [0, 0, 0.3]
+      - [0, 0, 0.3]
+      # - [0, 0, 0.4]
+
+  asset:
+    assetRoot: "./assets"
+    datasetPath: "lamp"
+    AssetNum: 7
+    randomAsset: False
+    load_block: "test"
+    limit_random: 0.5
+    Assets:
+      'test':
+        'lamp4':
+          bounding_box: lamp4/bounding_box.json
+          name: 'lamp4'
+          path: lamp4/mobility.urdf
+        'lamp5':
+          bounding_box: lamp5/bounding_box.json
+          name: 'lamp5'
+          path: lamp5/mobility.urdf
+        'lamp6':
+          bounding_box: lamp6/bounding_box.json
+          name: 'lamp6'
+          path: lamp6/mobility.urdf
+        'lamp7':
+          bounding_box: lamp7/bounding_box.json
+          name: 'lamp7'
+          path: lamp7/mobility.urdf
+        'lamp8':
+          bounding_box: lamp8/bounding_box.json
+          name: 'lamp8'
+          path: lamp8/mobility.urdf
+        'lamp9':
+          bounding_box: lamp9/bounding_box.json
+          name: 'lamp9'
+          path: lamp9/mobility.urdf
+        'lamp10':
+          bounding_box: lamp10/bounding_box.json
+          name: 'lamp10'
+          path: lamp10/mobility.urdf
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+  flex:
+    num_outer_iterations: 5
+    num_inner_iterations: 20
+    warm_start: 0.8
+    relaxation: 0.75

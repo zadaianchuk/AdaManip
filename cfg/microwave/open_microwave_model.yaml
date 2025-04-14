@@ -1,0 +1,145 @@
+task:
+  task_name: "open_microwave"
+  policy: "adaptive"
+  num_episode: 10
+  grasp: False
+
+model:
+  obs_horizon: 2
+  action_horizon: 1
+  pred_horizon: 4
+  num_diffusion_iters: 100
+  discrete: False
+  input_feat: 3
+  feat_dim: 128
+  dof_dim: 0
+  action_dim: 10
+  Transformer: False
+  grasp: False 
+  grasp_model_path: None
+  diffusion_model_path: './ckpt/microwave/microwave_manip.pth'
+
+
+env:
+  env_name: "open microwave"
+  numEnvs: 10
+  numObservations: 26
+  numActions: 10
+  envSpacing: 2.0
+  horizon: 30
+  clockwise: 0.5
+  randomPose: 0.00
+  pc_normalize: True
+  actionSpeedScale: 20
+  enableDebugVis: False
+
+  enableCameraSensors: True
+  enableForceSensors: False
+
+  collectData: True
+  collect_all: True
+  start_index: 80
+  collectDataPath: "microwave/0" # ../logs/_seed{}/***
+  collectPC: False
+  collectForce: True
+  visualizePointcloud: False
+  PointDownSampleNum: 2048
+
+  reset:
+    bottle:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+    franka:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+
+  driveMode: "osc"
+  clipObservations: 5.0
+  clipActions: 1.0
+  cam: 
+    width: 128
+    height: 128
+    cam_far_plane: 100
+    cam_near_plane: 0.01
+    cam_horizontal_fov: 85
+    cam_start:
+      - [0.15, -0.5, 0.8]
+      - [0.15, 0.5, 0.8]
+      # - [-0.1, -0.17, 0.5]
+    cam_target: 
+      - [0, 0, 0.7]
+      - [0, 0, 0.7]
+      # - [0, 0, 0.4]
+
+  asset:
+    assetRoot: "./assets"
+    datasetPath: "microwave"
+    AssetNum: 10
+    randomAsset: False
+    load_block: "test"
+    StartID: 0
+    Assets:
+      'test':
+        'mv_2':
+          bounding_box: mv_2/bounding_box.json
+          name: 'mv_2'
+          path: mv_2/mobility.urdf
+        'mv_3':
+          bounding_box: mv_3/bounding_box.json
+          name: 'mv_3'
+          path: mv_3/mobility.urdf
+        'mv_4':
+          bounding_box: mv_4/bounding_box.json
+          name: 'mv_4'
+          path: mv_4/mobility.urdf
+        'mv_5':
+          bounding_box: mv_5/bounding_box.json
+          name: 'mv_5'
+          path: mv_5/mobility.urdf
+        'mv_6':
+          bounding_box: mv_6/bounding_box.json
+          name: 'mv_6'
+          path: mv_6/mobility.urdf
+        'mv_7':
+          bounding_box: mv_7/bounding_box.json
+          name: 'mv_7'
+          path: mv_7/mobility.urdf
+        'mv_8':
+          bounding_box: mv_8/bounding_box.json
+          name: 'mv_8'
+          path: mv_8/mobility.urdf
+        'mv_9':
+          bounding_box: mv_9/bounding_box.json
+          name: 'mv_9'
+          path: mv_9/mobility.urdf
+        'mv_10':
+          bounding_box: mv_10/bounding_box.json
+          name: 'mv_10'
+          path: mv_10/mobility.urdf
+        'mv_11':
+          bounding_box: mv_11/bounding_box.json
+          name: 'mv_11'
+          path: mv_11/mobility.urdf      
+
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+  flex:
+    num_outer_iterations: 5
+    num_inner_iterations: 20
+    warm_start: 0.8
+    relaxation: 0.75

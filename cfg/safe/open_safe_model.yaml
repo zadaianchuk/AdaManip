@@ -1,0 +1,135 @@
+task:
+  task_name: "open_safe"
+  policy: "ada"
+  num_episode: 10
+  seed: 6
+  grasp: False
+
+model:
+  obs_horizon: 4
+  action_horizon: 1
+  pred_horizon: 4
+  num_diffusion_iters: 100
+  discrete: False
+  input_feat: 3
+  feat_dim: 128
+  dof_dim: 0
+  action_dim: 10
+  Transformer: False
+  grasp: False 
+  grasp_model_path: None
+  diffusion_model_path: './ckpt/safe/manip_safe.pth'
+
+
+env:
+  env_name: "open safe"
+  numEnvs: 8
+  numObservations: 26
+  numActions: 10
+  envSpacing: 2.0
+  horizon: 40
+  clockwise: 0.5
+  randomPose: 0.00
+  pc_normalize: True
+  actionSpeedScale: 20
+  enableDebugVis: False
+
+  enableCameraSensors: True
+  enableForceSensors: False
+
+  collectData: True
+  collect_all: True
+  collectPC: False
+  collectForce: True
+  visualizePointcloud: False
+  PointDownSampleNum: 4096
+
+  reset:
+    bottle:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+    franka:
+      resetPositionNoise: 0.0
+      resetRotationNoise: 0.0
+      resetDofPosRandomInterval: 0.0
+      resetDofVelRandomInterval: 0.0
+
+  driveMode: "osc"
+  clipObservations: 5.0
+  clipActions: 1.0
+  cam: 
+    width: 128
+    height: 128
+    cam_far_plane: 100
+    cam_near_plane: 0.01
+    cam_horizontal_fov: 85
+    cam_start:
+      - [0.15, -0.5, 0.8]
+      - [0.15, 0.5, 0.8]
+      # - [-0.1, -0.17, 0.5]
+    cam_target: 
+      - [0, 0, 0.7]
+      - [0, 0, 0.7]
+      # - [0, 0, 0.4]
+
+  asset:
+    assetRoot: "./assets"
+    datasetPath: "safe"
+    AssetNum: 8
+    randomAsset: False
+    load_block: "test"
+    StartID: 0
+    Assets:
+      'test':
+        'sa1':
+          bounding_box: sa1/bounding_box.json
+          name: 'sa1'
+          path: sa1/mobility.urdf
+        'sa2':
+          bounding_box: sa2/bounding_box.json
+          name: 'sa2'
+          path: sa2/mobility.urdf
+        'sa4':
+          bounding_box: sa4/bounding_box.json
+          name: 'sa4'
+          path: sa4/mobility.urdf
+        'sa9':
+          bounding_box: sa9/bounding_box.json
+          name: 'sa9'
+          path: sa9/mobility.urdf
+        'sa6':
+          bounding_box: sa6/bounding_box.json
+          name: 'sa6'
+          path: sa6/mobility.urdf
+        'sa10':
+          bounding_box: sa10/bounding_box.json
+          name: 'sa10'
+          path: sa10/mobility.urdf
+        'sa3':
+          bounding_box: sa3/bounding_box.json
+          name: 'sa3'
+          path: sa3/mobility.urdf
+        'sa12':
+          bounding_box: sa12/bounding_box.json
+          name: 'sa12'
+          path: sa12/mobility.urdf    
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+  flex:
+    num_outer_iterations: 5
+    num_inner_iterations: 20
+    warm_start: 0.8
+    relaxation: 0.75

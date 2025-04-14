@@ -1,0 +1,1 @@
+python run.py --task=OpenWindow --controller=ModelController --manipulation=OpenWindowManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/window/open_window_model.yaml
