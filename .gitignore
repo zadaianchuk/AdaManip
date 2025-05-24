@@ -12,3 +12,4 @@ real_pc_visual.py
 isaacgym/*
 Pointnet2_PyTorch/*
 pytorch3d/*
+test_rgbd_standalone_output/*
