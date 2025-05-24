@@ -1,1 +1,1 @@
-python run.py --task=OpenPressureCooker --controller=ModelController --manipulation=OpenPressureCookerManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/pressure_cooker/open_pc_model.yaml
+python run.py --headless --task=OpenPressureCooker --controller=ModelController --manipulation=OpenPressureCookerManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/pressure_cooker/open_pc_model.yaml

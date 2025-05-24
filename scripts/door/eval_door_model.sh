@@ -1,1 +1,1 @@
-python run.py --task=OpenDoor --controller=ModelController --manipulation=OpenDoorManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/door/open_door_model.yaml
+python run.py --headless --task=OpenDoor --controller=ModelController --manipulation=OpenDoorManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/door/open_door_model.yaml
