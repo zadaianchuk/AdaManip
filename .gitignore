@@ -9,3 +9,6 @@ ckpt/*
 seg_real.py
 sample_real.py
 real_pc_visual.py
+isaacgym/*
+Pointnet2_PyTorch/*
+pytorch3d/*
