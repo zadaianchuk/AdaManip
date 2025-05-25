@@ -413,7 +413,6 @@ class BaseEnv():
     def post_physics_step(self):
         raise NotImplementedError
 
-
 def get_attr_val_from_sample(sample, offset, prop, attr):
     """Retrieves param value for the given prop and attr from the sample."""
     if sample is None:

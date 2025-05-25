@@ -228,6 +228,7 @@ class OpenBottle(BaseEnv):
         self.eff_act = torch.zeros((self.num_envs, self.dof_dim), device=self.device)
         self.stage = torch.zeros((self.num_envs, 2), device=self.device)
         self.open_door_stage = torch.zeros((self.num_envs), device=self.device)
+        self.open_bottle_stage = torch.zeros((self.num_envs), device=self.device)
 
         self.action_speed_scale = cfg["env"]["actionSpeedScale"]
 

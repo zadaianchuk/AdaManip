@@ -80,7 +80,7 @@ RGBD datasets are stored in zarr format with the following structure:
 ```
 dataset.zarr/
 ├── data/
-│   ├── pcs/                    # Point cloud data
+│   ├── pcs/                   # Point cloud data
 │   ├── env_state/             # Environment state data
 │   ├── action/                # Action data
 │   ├── rgb_images/            # RGB image data
