@@ -13,3 +13,29 @@ isaacgym/*
 Pointnet2_PyTorch/*
 pytorch3d/*
 test_rgbd_standalone_output/*
+
+# Additional data folders
+d3fields_datasets/*
+dataset/*
+debug_camera_extraction/*
+png_samples/*
+test_d3fields_fixed/*
+test_d3fields_output/*
+test_d3fields_small/*
+test_d3fields_with_camera_params/*
+test_rgbd/*
+
+# Backup and temporary files
+*.bak
+*.tmp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
