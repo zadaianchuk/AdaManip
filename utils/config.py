@@ -154,8 +154,8 @@ def get_args():
         {"name": "--manipulation", "type": str, "default": "OpenBottleManipulation"},
         {"name": "--logdir", "type": str, "default": "./logs/"},
         {"name": "--cfg_env", "type": str, "default": "Base"},
-        {"name": "--seed", "type": int, "default":-1, "help": "Random seed"},
-        {"name": "--start_id", "type": int, "default":0, "help": "Start Index of the loaded assets"}]
+        {"name": "--seed", "type": int, "default": 42, "help": "Random seed"},
+        {"name": "--start_id", "type": int, "default": 0, "help": "Start Index of the loaded assets"}]
 
     # parse arguments
     args = gymutil.parse_arguments(
