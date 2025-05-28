@@ -1,67 +1,6 @@
 # Installing Different Versions of NVCC and CUDA Development Tools with Conda - Complete Tutorial
 
-## Overview
-NVCC is the NVIDIA CUDA Compiler that's essential for compiling CUDA code. Installing specific versions through Conda provides better environment management and compatibility control. This tutorial covers all CUDA package options including development tools.
-
-## Prerequisites
-- Conda or Miniconda installed
-- NVIDIA GPU with appropriate drivers
-- Active conda environment (recommended)
-
-## Understanding Different CUDA Packages
-
-### 1. `cuda-toolkit` (Full Toolkit - Recommended for Complete Development)
-```bash
-conda install cuda-toolkit=11.7 -c nvidia
-```
-- **What it includes**: Complete CUDA toolkit (nvcc, libraries, headers, samples)
-- **Use when**: You need everything for CUDA development
-- **Size**: Largest installation (~3-4GB)
-
-### 2. `cuda-nvcc` (Compiler Only)
-```bash
-conda install cuda-nvcc=11.7 -c nvidia
-```
-- **What it includes**: Just the NVCC compiler
-- **Use when**: You only need to compile CUDA code
-- **Size**: Minimal (~200MB)
-
-### 3. `cudatoolkit-dev` (Development Tools - Critical for Extensions!)
-```bash
-conda install cudatoolkit-dev=11.7 -c conda-forge
-```
-- **What it includes**: Development headers, libraries, and tools
-- **Use when**: Building packages that need CUDA headers (PyTorch extensions, PointNet++, etc.)
-- **Size**: Medium (~1-2GB)
-- **Special note**: Often required for compiling Python extensions with CUDA
-
-### 4. `cudatoolkit` (Runtime Only)
-```bash
-conda install cudatoolkit=11.7 -c conda-forge
-```
-- **What it includes**: Runtime libraries only (no compiler, no headers)
-- **Use when**: You only need to run CUDA applications
-- **Size**: Medium (~1GB)
-
-## Package Compatibility Matrix
-
-| Package | NVCC | Libraries | Headers | Runtime | Use Case |
-|---------|------|-----------|---------|---------|----------|
-| `cuda-toolkit` | ✅ | ✅ | ✅ | ✅ | Complete development |
-| `cuda-nvcc` | ✅ | ❌ | ❌ | ❌ | Compilation only |
-| `cudatoolkit-dev` | ❌ | ✅ | ✅ | ✅ | Extension building |
-| `cudatoolkit` | ❌ | ✅ | ❌ | ✅ | Runtime only |
-
-## Step-by-Step Installation
-
-### 1. Create and Activate Environment
-```bash
-# Create a new environment with Python 3.8
-conda create -n your_env_name python=3.8
-conda activate your_env_name
-```
-
-### 2. Check Current CUDA/NVCC Status
+### 1. Check Current CUDA/NVCC Status
 ```bash
 # Check if nvcc is available
 which nvcc
@@ -76,7 +15,6 @@ nvidia-smi
 
 ### 3. Installation Strategies
 
-#### Strategy A: For Deep Learning Development (Recommended)
 ```bash
 # 1. Create environment
 conda create -n dl_env python=3.8
@@ -236,40 +174,3 @@ conda install cudatoolkit-dev=11.7 cuda-nvcc=11.7 -c conda-forge -c nvidia
 pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
 pip install pytorch3d
 ```
-
-### For General CUDA Development
-```bash
-conda create -n cuda_dev python=3.8
-conda activate cuda_dev
-conda install cuda-toolkit=11.7 -c nvidia
-# Now you have everything: nvcc, headers, libraries, samples
-```
-
-## Best Practices
-
-1. **Use Virtual Environments**: Always install CUDA tools in dedicated conda environments
-2. **Match PyTorch Version**: Ensure CUDA version matches your PyTorch installation
-3. **Check GPU Compatibility**: Verify your GPU supports the CUDA version
-4. **Use Official Channels**: Prefer `-c nvidia` for toolkit/nvcc, `-c conda-forge` for dev tools
-5. **Install Dev Tools First**: When building extensions, install `cudatoolkit-dev` before compilation
-6. **Verify After Installation**: Always test with `nvcc --version` and Python CUDA availability
-
-## Version Compatibility Guide
-
-### CUDA 11.7 (Recommended for Most Cases)
-- Compatible with RTX 30xx, RTX 40xx series
-- Good PyTorch support
-- Stable and well-tested
-
-### CUDA 11.8
-- Latest stable for most applications
-- Best RTX 40xx support
-- Newest PyTorch versions
-
-### CUDA 12.x
-- Latest features
-- May have compatibility issues with older packages
-- Use only if specifically needed
-
-## Summary
-This tutorial covers all aspects of CUDA installation with conda, from basic runtime to complete development environments. The key insight is understanding which package combination you need for your specific use case, especially the importance of `cudatoolkit-dev` for building CUDA extensions in Python. 
