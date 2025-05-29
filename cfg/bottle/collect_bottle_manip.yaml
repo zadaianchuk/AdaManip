@@ -1,7 +1,7 @@
 task:
   task_name: "open_bottle"
   policy: "adaptive"
-  num_episode: 20
+  num_episode: 1
   num_eval_episode: 10
   seed: 0
   grasp: False

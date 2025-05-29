@@ -1,7 +1,7 @@
 task:
   task_name: "open_safe"
   policy: "adaptive"
-  num_episode: 20
+  num_episode: 1
   seed: 8
   grasp: False
 
@@ -45,9 +45,9 @@ env:
   clipObservations: 5.0
   clipActions: 1.0
   cam: 
-    width: 128
-    height: 128
-    cam_far_plane: 100
+    width: 512
+    height: 512
+    cam_far_plane: 5
     cam_near_plane: 0.01
     cam_horizontal_fov: 85
     cam_start:

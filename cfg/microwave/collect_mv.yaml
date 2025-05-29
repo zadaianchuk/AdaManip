@@ -1,7 +1,7 @@
 task:
   task_name: "open_microwave"
   policy: "adaptive"
-  num_episode: 25
+  num_episode: 1
   grasp: False
 
 env:
@@ -45,8 +45,8 @@ env:
   clipObservations: 5.0
   clipActions: 1.0
   cam: 
-    width: 128
-    height: 128
+    width: 512
+    height: 512
     cam_far_plane: 100
     cam_near_plane: 0.01
     cam_horizontal_fov: 85
