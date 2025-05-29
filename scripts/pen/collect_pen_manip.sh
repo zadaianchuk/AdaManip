@@ -1,1 +1,1 @@
-python run.py --headless --task=OpenPen --controller=GtController --manipulation=OpenPenManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/pen/collect_pen_manip.yaml
+python run_rgbd.py --headless --task=OpenPen --controller=GtController --manipulation=OpenPenManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/pen/collect_pen_manip.yaml
