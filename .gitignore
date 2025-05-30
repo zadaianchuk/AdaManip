@@ -16,6 +16,8 @@ test_rgbd_standalone_output/*
 
 # Additional data folders
 d3fields_datasets/*
+adamanip_d3fields/*
+d3fields_datasets_old/*
 dataset/*
 debug_camera_extraction/*
 png_samples/*
