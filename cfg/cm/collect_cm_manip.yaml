@@ -1,5 +1,5 @@
 task:
-  task_name: "open_cm"
+  task_name: "open_coffeemachine"
   policy: "adaptive"
   num_episode: 1
   num_eval_episode: 10
