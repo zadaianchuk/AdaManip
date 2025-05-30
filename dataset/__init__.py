@@ -15,9 +15,6 @@ from .dataset import (
 from .dataset_rgbd import (
     RGBDEpisodeBuffer,
     RGBDExperience, 
-    RGBDManipDataset,
-    load_rgbd_dataset,
-    merge_rgbd_dataset
 )
 
 __all__ = [
@@ -25,6 +22,5 @@ __all__ = [
     'Episode_Buffer', 'Experience', 'ManipDataset',
     'obs_wrapper', 'nested_dict_save', 'create_sample_indices', 'sample_sequence', 'merge_dataset',
     # RGBD dataset classes
-    'RGBDEpisodeBuffer', 'RGBDExperience', 'RGBDManipDataset',
-    'load_rgbd_dataset', 'merge_rgbd_dataset'
+    'RGBDEpisodeBuffer', 'RGBDExperience',
 ] 

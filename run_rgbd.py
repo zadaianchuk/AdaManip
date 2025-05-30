@@ -16,7 +16,7 @@ from utils.config import set_np_formatting, set_seed, get_args, parse_sim_params
 from utils.parse_task import parse_env
 from utils.parse import *
 from dataset.dataset_rgbd import RGBDExperience, RGBDEpisodeBuffer
-from utils.rgbd_utils import add_rgbd_collection_to_env, debug_rgbd_collection
+from utils.rgbd_utils import add_rgbd_collection_to_env
 
 # Now safe to import torch
 import torch
@@ -26,13 +26,7 @@ def run_rgbd():
     logger = Logger(name=args.task)
 
     env = parse_env(args, cfg, sim_params, logdir)
-
-    # Add RGBD data collection capability if not already present
-    if not hasattr(env, 'collect_rgbd_data'):
-        print("Adding RGBD collection capability to environment...")
-        add_rgbd_collection_to_env(env.__class__)
-    else:
-        print("Environment already has RGBD collection capability.")
+    add_rgbd_collection_to_env(env.__class__)
     
     # Debug RGBD collection capability (but don't pass debug parameter)
     print("Debugging RGBD collection...")
@@ -42,11 +36,11 @@ def run_rgbd():
         if 'rgb_images' in test_obs and 'depth_images' in test_obs:
             rgb_shape = test_obs['rgb_images'].shape
             depth_shape = test_obs['depth_images'].shape
-            print(f"✅ RGBD collection working - RGB: {rgb_shape}, Depth: {depth_shape}")
+            print(f"RGBD collection working - RGB: {rgb_shape}, Depth: {depth_shape}")
         else:
-            print("⚠️ RGBD collection returned data but missing image keys")
+            print("RGBD collection returned data but missing image keys")
     except Exception as e:
-        print(f"❌ RGBD collection test failed: {e}")
+        print(f"RGBD collection test failed: {e}")
         # Fall back to adding capability
         add_rgbd_collection_to_env(env.__class__)
     
@@ -65,17 +59,17 @@ def run_rgbd():
     def run_rgbd_controller(eval=False):
         if hasattr(controller, 'collect_grasp') and controller.collect_grasp:
             if hasattr(manipulation, 'collect_grasp_data_rgbd'):
-                print("🎯 Using RGBD grasp data collection")
+                print("Using RGBD grasp data collection")
                 manipulation.collect_grasp_data_rgbd()
             else:
-                print("⚠️ RGBD grasp data collection not available, falling back to original")
+                print("RGBD grasp data collection not available, falling back to original")
                 manipulation.collect_grasp_data()
         else:
             if hasattr(manipulation, 'collect_manip_data_rgbd'):
-                print("🎯 Using RGBD manipulation data collection")
+                print("Using RGBD manipulation data collection")
                 manipulation.collect_manip_data_rgbd()
             else:
-                print("⚠️ RGBD manip data collection not available, falling back to original")
+                print("RGBD manip data collection not available, falling back to original")
                 manipulation.collect_manip_data()
     
     controller.run = run_rgbd_controller
@@ -85,7 +79,9 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
     """RGBD version of grasp data collection"""
     print("Collecting grasp data with RGBD observations...")
     eps_num = cfg["task"]["num_episode"]
-    demo_buffer = RGBDExperience()
+    
+    # Create separate demo buffers for each environment
+    demo_buffers = [RGBDExperience() for _ in range(env.num_envs)]
     
     for eps in range(eps_num):
         eps_buffer = [RGBDEpisodeBuffer() for _ in range(env.num_envs)]
@@ -107,8 +103,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
             try:
                 rgbd_obs = env.collect_rgbd_data()
             except Exception as e:
-                print(f"⚠️ RGBD collection failed, falling back to regular collection: {e}")
-                rgbd_obs = env.collect_diff_data() if hasattr(env, 'collect_diff_data') else {}
+                raise ValueError(f"RGBD collection failed: {e}")
             
             # Step environment
             for j in range(10):
@@ -122,12 +117,20 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
             for env_id in range(env.num_envs):
                 try:
                     if isinstance(rgbd_obs, dict) and 'rgb_images' in rgbd_obs:
+                        # Extract camera parameters if available
+                        camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
+                        camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
+                        camera_info = rgbd_obs.get('camera_info', None)
+                        
                         eps_buffer[env_id].add_rgbd(
                             rgbd_obs['pc'][env_id], 
                             rgbd_obs['proprioception'][env_id], 
                             gt_action[env_id],
                             rgbd_obs['rgb_images'][env_id],
-                            rgbd_obs['depth_images'][env_id]
+                            rgbd_obs['depth_images'][env_id],
+                            camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
+                            camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
+                            camera_info=camera_info[env_id] if camera_info is not None else None
                         )
                     else:
                         # Fallback to regular data collection
@@ -135,7 +138,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
                         pc, env_state = obs_wrapper(rgbd_obs)
                         eps_buffer[env_id].add(pc[env_id], env_state[env_id], gt_action[env_id])
                 except Exception as e:
-                    print(f"⚠️ Error storing data for env {env_id}: {e}")
+                    print(f"Error storing data for env {env_id}: {e}")
         
         # Second phase - grasp
         if hasattr(env, 'gripper_length'):
@@ -147,7 +150,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
             try:
                 rgbd_obs = env.collect_rgbd_data()
             except Exception as e:
-                print(f"⚠️ RGBD collection failed, falling back to regular collection: {e}")
+                print(f"RGBD collection failed, falling back to regular collection: {e}")
                 rgbd_obs = env.collect_diff_data() if hasattr(env, 'collect_diff_data') else {}
             
             for j in range(10):
@@ -159,42 +162,51 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
             for env_id in range(env.num_envs):
                 try:
                     if isinstance(rgbd_obs, dict) and 'rgb_images' in rgbd_obs:
+                        # Extract camera parameters if available
+                        camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
+                        camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
+                        camera_info = rgbd_obs.get('camera_info', None)
+                        
                         eps_buffer[env_id].add_rgbd(
                             rgbd_obs['pc'][env_id], 
                             rgbd_obs['proprioception'][env_id], 
                             gt_action[env_id],
                             rgbd_obs['rgb_images'][env_id],
-                            rgbd_obs['depth_images'][env_id]
+                            rgbd_obs['depth_images'][env_id],
+                            camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
+                            camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
+                            camera_info=camera_info[env_id] if camera_info is not None else None
                         )
                     else:
                         from dataset.dataset import obs_wrapper
                         pc, env_state = obs_wrapper(rgbd_obs)
                         eps_buffer[env_id].add(pc[env_id], env_state[env_id], gt_action[env_id])
                 except Exception as e:
-                    print(f"⚠️ Error storing data for env {env_id}: {e}")
+                    print(f"Error storing data for env {env_id}: {e}")
         
-        # Add episodes to demo buffer
+        # Add episodes to respective demo buffers
         for env_id in range(env.num_envs):
-            demo_buffer.append(eps_buffer[env_id])
-        print(f"✅ RGBD Episode {eps+1} completed")
+            demo_buffers[env_id].append(eps_buffer[env_id])
+        print(f"RGBD Episode {eps+1} completed")
     
-    # Save RGBD dataset
+    # Save RGBD dataset for each environment separately
     if cfg.get('env', {}).get('collectData', False):
         task_name = args.task if hasattr(args, 'task') else 'unknown'
         asset_num = cfg.get('env', {}).get('asset', {}).get('AssetNum', 1)
         clockwise = cfg.get('env', {}).get('clockwise', 0.5)
-        dataset_path = f"rgbd_grasp_{task_name}_{asset_num}_eps{eps_num}_clock{clockwise}"
-        save_dir = f'./demo_data/{dataset_path}'
-        save_path = f'{save_dir}/rgbd_demo_data.zarr'
-        os.makedirs(save_dir, exist_ok=True)
         
-        try:
-            demo_buffer.save(save_path)
-            print(f"✅ RGBD grasp dataset saved to {save_path}")
-        except Exception as e:
-            print(f"❌ Failed to save RGBD dataset: {e}")
+        for env_id in range(env.num_envs):
+            dataset_path = f"grasp_env_{env_id}"
+            save_dir = f'./adamanip_d3fields/{task_name}/{dataset_path}'
+            os.makedirs(save_dir, exist_ok=True)
+            
+            try:
+                demo_buffers[env_id].save_png_npy(save_dir)
+                print(f"RGBD grasp dataset for env {env_id} saved to {save_dir}")
+            except Exception as e:
+                raise ValueError(f"Failed to save RGBD dataset for env {env_id}: {e}")
     else:
-        print("ℹ️ Data collection is disabled in config, dataset not saved")
+        print("Data collection is disabled in config, dataset not saved")
 
 def collect_manip_data_rgbd(manipulation, env, cfg):
     """RGBD version of manipulation data collection"""
@@ -203,9 +215,10 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
     policy = cfg["task"].get("policy", "succ")
     max_step = cfg["task"].get("max_step", 25)
     
-    print(f"📊 Episodes: {eps_num}, Policy: {policy}, Max steps: {max_step}")
+    print(f"Episodes: {eps_num}, Policy: {policy}, Max steps: {max_step}")
     
-    demo_buffer = RGBDExperience()
+    # Create separate demo buffers for each environment
+    demo_buffers = [RGBDExperience() for _ in range(env.num_envs)]
     
     for eps in range(eps_num):
         eps_buffer = [RGBDEpisodeBuffer() for _ in range(env.num_envs)]
@@ -229,7 +242,7 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
             try:
                 rgbd_obs = env.collect_rgbd_data()
             except Exception as e:
-                print(f"⚠️ RGBD collection failed at step {step}, falling back: {e}")
+                print(f"RGBD collection failed at step {step}, falling back: {e}")
                 rgbd_obs = env.collect_diff_data() if hasattr(env, 'collect_diff_data') else {}
             
             # Generate actions based on policy
@@ -246,7 +259,7 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
                         action = generate_action_from_policy(env, manipulation, env_id, action_type, hand_pose[env_id])
                         actions.append(action)
                     except Exception as e:
-                        print(f"⚠️ Policy error for env {env_id}: {e}")
+                        print(f"Policy error for env {env_id}: {e}")
                         actions.append(hand_pose[env_id])
                 elif hasattr(manipulation, 'ada_policy'):
                     try:
@@ -259,7 +272,7 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
                         action = generate_action_from_policy(env, manipulation, env_id, action_type, hand_pose[env_id])
                         actions.append(action)
                     except Exception as e:
-                        print(f"⚠️ Adaptive policy error for env {env_id}: {e}")
+                        print(f"Adaptive policy error for env {env_id}: {e}")
                         actions.append(hand_pose[env_id])
                 else:
                     # Default: stay in place
@@ -279,50 +292,59 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
                 if not done_flag[env_id]:
                     try:
                         if isinstance(rgbd_obs, dict) and 'rgb_images' in rgbd_obs:
+                            # Extract camera parameters if available
+                            camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
+                            camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
+                            camera_info = rgbd_obs.get('camera_info', None)
+                            
                             eps_buffer[env_id].add_rgbd(
                                 rgbd_obs['pc'][env_id], 
                                 rgbd_obs['proprioception'][env_id], 
                                 gt_action[env_id],
                                 rgbd_obs['rgb_images'][env_id],
-                                rgbd_obs['depth_images'][env_id]
+                                rgbd_obs['depth_images'][env_id],
+                                camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
+                                camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
+                                camera_info=camera_info[env_id] if camera_info is not None else None
                             )
                         else:
                             from dataset.dataset import obs_wrapper
                             pc, env_state = obs_wrapper(rgbd_obs)
                             eps_buffer[env_id].add(pc[env_id], env_state[env_id], gt_action[env_id])
                     except Exception as e:
-                        print(f"⚠️ Error storing manipulation data for env {env_id}: {e}")
+                        print(f"Error storing manipulation data for env {env_id}: {e}")
             
             # Check success conditions
             for env_id in range(env.num_envs):
                 if not done_flag[env_id] and check_success_condition(env, env_id):
                     done_flag[env_id] = True
-                    print(f"✅ Env {env_id} succeeded at step {step}")
+                    print(f"Env {env_id} succeeded at step {step}")
         
-        # Add episodes to demo buffer
+        # Add episodes to respective demo buffers
         for env_id in range(env.num_envs):
-            demo_buffer.append(eps_buffer[env_id])
+            demo_buffers[env_id].append(eps_buffer[env_id])
         
         success_count = sum(done_flag)
-        print(f"✅ RGBD Manipulation Episode {eps+1} completed - {success_count}/{env.num_envs} succeeded")
+        print(f"RGBD Manipulation Episode {eps+1} completed - {success_count}/{env.num_envs} succeeded")
     
-    # Save RGBD dataset
+    # Save RGBD dataset for each environment separately
     if cfg.get('env', {}).get('collectData', False):
         task_name = args.task if hasattr(args, 'task') else 'unknown'
         asset_num = cfg.get('env', {}).get('asset', {}).get('AssetNum', 1)
         clockwise = cfg.get('env', {}).get('clockwise', 0.5)
-        dataset_path = f"rgbd_manip_{task_name}_{policy}_{asset_num}_eps{eps_num}_clock{clockwise}"
-        save_dir = f'./demo_data/{dataset_path}'
-        save_path = f'{save_dir}/rgbd_demo_data.zarr'
-        os.makedirs(save_dir, exist_ok=True)
         
-        try:
-            demo_buffer.save(save_path)
-            print(f"✅ RGBD manipulation dataset saved to {save_path}")
-        except Exception as e:
-            print(f"❌ Failed to save RGBD dataset: {e}")
+        for env_id in range(env.num_envs):
+            dataset_path = f"manip_env_{env_id}"
+            save_dir = f'./adamanip_d3fields/{task_name}/{dataset_path}'
+            os.makedirs(save_dir, exist_ok=True)
+            
+            try:
+                demo_buffers[env_id].save_png_npy(save_dir)
+                print(f"RGBD manipulation dataset for env {env_id} saved to {save_dir}")
+            except Exception as e:
+                print(f"Failed to save RGBD dataset for env {env_id}: {e}")
     else:
-        print("ℹ️ Data collection is disabled in config, dataset not saved")
+        print("Data collection is disabled in config, dataset not saved")
 
 def generate_action_from_policy(env, manipulation, env_id, action_type, current_pose):
     """Generate action based on policy type"""
@@ -350,7 +372,7 @@ def generate_action_from_policy(env, manipulation, env_id, action_type, current_
             # Default: no change
             return current_pose
     except Exception as e:
-        print(f"⚠️ Error generating action: {e}")
+        print(f"Error generating action: {e}")
         return current_pose
 
 def check_success_condition(env, env_id):
@@ -373,7 +395,7 @@ if __name__ == '__main__':
     set_np_formatting()
 
     args = get_args()
-
+    print(args)
     cfg, logdir = load_cfg(args)
 
     sim_params = parse_sim_params(args, cfg)

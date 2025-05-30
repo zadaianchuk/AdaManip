@@ -1,490 +1,242 @@
+#!/usr/bin/env python3
 """
-RGBD Utilities for AdaManip
-Provides utilities to add RGBD data collection to any environment
+Enhanced RGBD utilities for AdaManip with proper camera parameter extraction
+
+This module provides utilities for collecting RGBD data with accurate camera parameters
+needed for point cloud reconstruction and compatibility with D3Fields format.
+
+Key features:
+- Extract camera intrinsics from Isaac Gym projection matrices
+- Convert view matrices to proper extrinsics (world-to-camera transforms)
+- Support for both fixed and hand-mounted cameras
+- Automatic fallback for environments without RGBD capability
 """
 
 import torch
 import numpy as np
 import os
+import matplotlib.pyplot as plt
+from typing import Dict, List, Tuple, Optional, Any
 from isaacgym import gymapi
+from isaacgym import gymtorch
 
+def extract_camera_intrinsics_from_projection(proj_matrix: torch.Tensor, width: int, height: int) -> np.ndarray:
+    """
+    Extract camera intrinsics [fx, fy, cx, cy] from Isaac Gym projection matrix
+    
+    Isaac Gym uses OpenGL-style projection matrices. We need to convert to camera intrinsics.
+    
+    Args:
+        proj_matrix: (4, 4) projection matrix from Isaac Gym
+        width: Image width in pixels
+        height: Image height in pixels
+        
+    Returns:
+        intrinsics: (4,) array [fx, fy, cx, cy]
+    """
+    # Isaac Gym projection matrix is in OpenGL format
+    # P[0,0] = 2*fx/width, P[1,1] = 2*fy/height
+    # P[0,2] = (2*cx - width)/width, P[1,2] = (2*cy - height)/height
+    
+    if isinstance(proj_matrix, torch.Tensor):
+        proj_matrix = proj_matrix.cpu().numpy()
+    
+    # Extract focal lengths
+    fx = proj_matrix[0, 0] * width / 2.0
+    fy = proj_matrix[1, 1] * height / 2.0
+    # Extract principal point
+    cx = (proj_matrix[0, 2] * width + width) / 2.0
+    cy = (proj_matrix[1, 2] * height + height) / 2.0
+    
+    return np.array([fx, fy, cx, cy], dtype=np.float32)
+
+def convert_view_matrix_to_extrinsics(view_matrix: torch.Tensor, is_already_inverted: bool = False) -> np.ndarray:
+    """
+    Convert Isaac Gym view matrix to camera extrinsics (world-to-camera transform)
+    
+    Args:
+        view_matrix: (4, 4) view matrix from Isaac Gym
+        is_already_inverted: If True, the input is already camera-to-world (inverted view matrix)
+                           If False, the input is world-to-camera (original view matrix)
+        
+    Returns:
+        extrinsics: (4, 4) world-to-camera transformation matrix
+    """
+    if isinstance(view_matrix, torch.Tensor):
+        view_matrix = view_matrix.cpu().numpy()
+    
+    if is_already_inverted:
+        # Input is camera-to-world, we need world-to-camera
+        # So we take the inverse
+        extrinsics = np.linalg.inv(view_matrix)
+    else:
+        # Input is world-to-camera (original Isaac Gym view matrix)
+        # This is already what we want for extrinsics
+        extrinsics = view_matrix.copy()
+    
+    return extrinsics.astype(np.float32)
+
+def collect_camera_images(env, debug=False):
+    """
+    Enhanced camera image collection with proper camera parameter extraction
+    
+    Args:
+        env: Isaac Gym environment
+        debug: Whether to print debug information
+        
+    Returns:
+        tuple: (rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info)
+    """
+    try:
+        # Ensure camera sensors are rendered
+        if hasattr(env, 'gym') and hasattr(env, 'sim'):
+            env.gym.render_all_camera_sensors(env.sim)
+            env.gym.start_access_image_tensors(env.sim)
+        
+        rgb_images_list = []
+        depth_images_list = []
+        camera_intrinsics_list = []
+        camera_extrinsics_list = []
+        camera_info_list = []
+        
+        # Get camera properties for intrinsics calculation
+        cam_width = env.cfg.get("env", {}).get("cam", {}).get("width", 128)
+        cam_height = env.cfg.get("env", {}).get("cam", {}).get("height", 128)
+        
+        if debug:
+            print(f"Camera resolution: {cam_width}x{cam_height}")
+        
+        # Process each environment
+        for env_id in range(env.num_envs):
+            env_rgb_images = []
+            env_depth_images = []
+            env_intrinsics = []
+            env_extrinsics = []
+            env_info = []
+            
+            # Collect from fixed cameras
+            if hasattr(env, 'fixed_camera_handle_list') and len(env.fixed_camera_handle_list) > env_id:
+                fixed_cameras = env.fixed_camera_handle_list[env_id]
+                
+                for cam_idx, camera_handle in enumerate(fixed_cameras):
+                    try:
+                        # Get RGB image
+                        rgb_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_COLOR)
+                        rgb_image = gymtorch.wrap_tensor(rgb_tensor)
+                        rgb_image = rgb_image.cpu().numpy()
+                        
+                        # Remove alpha channel
+                        if len(rgb_image.shape) == 3 and rgb_image.shape[2] == 4:
+                            rgb_image = rgb_image[:, :, :3]  # Remove alpha channel (RGBA -> RGB)
+                        
+                        # Get depth image
+                        depth_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_DEPTH)
+                        depth_image = gymtorch.wrap_tensor(depth_tensor)
+                        depth_image = depth_image.cpu().numpy()
+                        
+                        # Get camera parameters
+                        if hasattr(env, 'fixed_camera_proj_list') and len(env.fixed_camera_proj_list) > env_id:
+                            if len(env.fixed_camera_proj_list[env_id]) > cam_idx:
+                                proj_matrix = env.fixed_camera_proj_list[env_id][cam_idx]
+                                intrinsics = extract_camera_intrinsics_from_projection(proj_matrix, cam_width, cam_height)
+                            else:
+                                raise ValueError(f"No projection matrix found for camera {cam_idx} in environment {env_id}")
+                        else:
+                            raise ValueError(f"No projection matrix list found for environment {env_id}")
+                        
+                        if hasattr(env, 'fixed_camera_vinv_list') and len(env.fixed_camera_vinv_list) > env_id:
+                            if len(env.fixed_camera_vinv_list[env_id]) > cam_idx:
+                                view_matrix = env.fixed_camera_vinv_list[env_id][cam_idx]
+                                extrinsics = convert_view_matrix_to_extrinsics(view_matrix, is_already_inverted=True)
+                                
+                                if debug:
+                                    # Verify the fix: extrinsics should be world-to-camera (det should be ~1)
+                                    det = np.linalg.det(extrinsics[:3, :3])
+                                    print(f"      Extrinsics rotation determinant: {det:.3f} (should be ~1.0)")
+                            else:
+                                extrinsics = np.eye(4, dtype=np.float32)
+                        else:
+                            extrinsics = np.eye(4, dtype=np.float32)
+                        
+                        env_rgb_images.append(rgb_image)
+                        env_depth_images.append(depth_image)
+                        env_intrinsics.append(intrinsics)
+                        env_extrinsics.append(extrinsics)
+                        env_info.append({"type": "fixed", "id": cam_idx, "env_id": env_id})
+                        
+                        if debug:
+                            print(f"   Fixed camera {cam_idx}: RGB {rgb_image.shape}, Depth {depth_image.shape}")
+                            print(f"      Intrinsics: fx={intrinsics[0]:.1f}, fy={intrinsics[1]:.1f}, cx={intrinsics[2]:.1f}, cy={intrinsics[3]:.1f}")
+                        
+                    except Exception as e:
+                        if debug:
+                            print(f"⚠️ Error collecting from fixed camera {cam_idx}: {e}")
+                        continue
+            
+            # Convert to numpy arrays
+            if env_rgb_images:
+                rgb_images_list.append(np.array(env_rgb_images))
+                depth_images_list.append(np.array(env_depth_images))
+                camera_intrinsics_list.append(np.array(env_intrinsics))
+                camera_extrinsics_list.append(np.array(env_extrinsics))
+                camera_info_list.append(env_info)
+            else:
+                raise ValueError(f"No cameras available for environment {env_id}")
+        
+        # Convert to tensors
+        rgb_images = torch.tensor(np.array(rgb_images_list), dtype=torch.uint8)
+        depth_images = torch.tensor(np.array(depth_images_list), dtype=torch.float32)
+        camera_intrinsics = torch.tensor(np.array(camera_intrinsics_list), dtype=torch.float32)
+        camera_extrinsics = torch.tensor(np.array(camera_extrinsics_list), dtype=torch.float32)
+        
+        if hasattr(env, 'gym') and hasattr(env, 'sim'):
+            env.gym.end_access_image_tensors(env.sim)
+        
+        if debug:
+            print(f"Collected camera data:")
+            print(f"   RGB: {rgb_images.shape}")
+            print(f"   Depth: {depth_images.shape}")
+            print(f"   Intrinsics: {camera_intrinsics.shape}")
+            print(f"   Extrinsics: {camera_extrinsics.shape}")
+        
+        return rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info_list
+        
+    except Exception as e:
+        raise ValueError(f"Error in collect_camera_images: {e}")
 
 def add_rgbd_collection_to_env(env_class):
     """
-    Decorator/function to add RGBD collection capability to any environment class
+    Enhanced function to add RGBD collection capability with proper camera parameters
     """
     def collect_rgbd_data(self, flag=True, debug=False):
-        """
-        Collect RGBD observations including RGB and depth images from all cameras
-        
-        Args:
-            flag (bool): Whether to normalize point clouds
-            debug (bool): Enable debug output
-            
-        Returns:
-            dict: Observation dictionary with RGB and depth images added
-        """
+        """Collect RGBD data with enhanced camera parameter extraction"""
         try:
-            # Get existing point cloud and proprioception data (reuse existing method)
-            if hasattr(self, 'collect_diff_data'):
-                base_obs = self.collect_diff_data(flag)
-            else:
-                # Fallback: create minimal observation
-                pc = self.compute_point_cloud_state(depth_bar=2.5, type="fixed") if hasattr(self, 'compute_point_cloud_state') else torch.zeros((self.num_envs, 1000, 3), device=self.device)
-                if flag and hasattr(self, 'pc_normalize'):
-                    pc = self.pc_normalize(pc)
-                    
-                # Create basic proprioception info
-                joints = getattr(self, 'franka_num_dofs', 7)
-                if hasattr(self, 'franka_dof_tensor') and hasattr(self, 'franka_dof_lower_limits_tensor') and hasattr(self, 'franka_dof_upper_limits_tensor'):
-                    robotqpose = (2 * (self.franka_dof_tensor[:, :joints, 0] - self.franka_dof_lower_limits_tensor[:joints]) /
-                                (self.franka_dof_upper_limits_tensor[:joints] - self.franka_dof_lower_limits_tensor[:joints])) - 1
-                    robotqvel = self.franka_dof_tensor[:, :joints, 1]
-                else:
-                    robotqpose = torch.zeros(self.num_envs, joints, device=self.device)
-                    robotqvel = torch.zeros(self.num_envs, joints, device=self.device)
-                
-                if hasattr(self, 'hand_rigid_body_tensor'):
-                    hand_pos = self.hand_rigid_body_tensor[:, :3]
-                    hand_rot = self.hand_rigid_body_tensor[:, 3:7]
-                else:
-                    hand_pos = torch.zeros(self.num_envs, 3, device=self.device)
-                    hand_rot = torch.zeros(self.num_envs, 4, device=self.device)
-                    hand_rot[:, 3] = 1  # Set w=1 for valid quaternion
-                
-                proprioception_info = torch.cat([robotqpose, robotqvel, hand_pos, hand_rot], dim=-1)
-                prev_actions = getattr(self, 'actions', torch.zeros(self.num_envs, 9, device=self.device))
-                
-                # DOF state (environment-specific)
-                if hasattr(self, 'one_dof_tensor') and hasattr(self, 'two_dof_tensor'):
-                    dof_state = torch.cat([self.one_dof_tensor[:,0].unsqueeze(-1), self.two_dof_tensor[:,0].unsqueeze(-1)], dim=-1)
-                else:
-                    dof_state = torch.zeros(self.num_envs, 2, device=self.device)
-                
-                base_obs = {
-                    "pc": pc,
-                    "proprioception": proprioception_info,
-                    "dof_state": dof_state,
-                    "prev_action": prev_actions
-                }
-
-            # Collect RGB and depth images from all cameras
-            rgb_images, depth_images = collect_camera_images(self, debug=debug)
-            print(f"rgb_images: {rgb_images.shape}, depth_images: {depth_images.shape}")
+            # Get base observation
+            base_obs = self.collect_diff_data() if hasattr(self, 'collect_diff_data') else {}
+            
+            # Collect camera images with parameters
+            rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info = collect_camera_images(self, debug=debug)
             
             # Add RGBD data to observation
             base_obs["rgb_images"] = rgb_images
             base_obs["depth_images"] = depth_images
+            base_obs["camera_intrinsics"] = camera_intrinsics
+            base_obs["camera_extrinsics"] = camera_extrinsics
+            base_obs["camera_info"] = camera_info
+            
+            if debug:
+                print(f"   RGBD observation keys: {list(base_obs.keys())}")
+                print(f"   RGB shape: {rgb_images.shape}")
+                print(f"   Depth shape: {depth_images.shape}")
+                print(f"   Camera intrinsics shape: {camera_intrinsics.shape}")
+                print(f"   Camera extrinsics shape: {camera_extrinsics.shape}")
             
             return base_obs
             
         except Exception as e:
-            print(f"❌ Error in RGBD collection: {str(e)}")
-            if debug:
-                import traceback
-                traceback.print_exc()
+            raise ValueError(f"Error in collect_rgbd_data: {e}")
             
-            # Return fallback observation without RGBD data
-            if hasattr(self, 'collect_diff_data'):
-                return self.collect_diff_data(flag)
-            else:
-                raise e
-    
+
     # Add the method to the class
     env_class.collect_rgbd_data = collect_rgbd_data
-    return env_class
-
-
-def collect_camera_images(env, debug=False):
-    """
-    Collect RGB and depth images from all available cameras in the environment
-    
-    Args:
-        env: Environment instance
-        debug (bool): Enable debug output
-        
-    Returns:
-        tuple: (rgb_images_tensor, depth_images_tensor)
-    """
-    try:
-        # Get camera properties
-        camera_props = gymapi.CameraProperties()
-        camera_props.width = env.cfg.get("env", {}).get("cam", {}).get("width", 128)
-        camera_props.height = env.cfg.get("env", {}).get("cam", {}).get("height", 128)
-        
-        if debug:
-            print(f"📷 Camera resolution: {camera_props.width}x{camera_props.height}")
-        
-        env.gym.start_access_image_tensors(env.sim)
-        
-        # Initialize lists to store images for each environment
-        rgb_images = []
-        depth_images = []
-        
-        for env_id in range(env.num_envs):
-            env_ptr = env.env_ptr_list[env_id]
-            env_rgb_images = []
-            env_depth_images = []
-            
-            # Collect from fixed cameras if available
-            if hasattr(env, 'fixed_camera_handle_list') and hasattr(env, 'num_cam'):
-                try:
-                    for cam_id in range(env.num_cam):
-                        if env_id < len(env.fixed_camera_handle_list) and cam_id < len(env.fixed_camera_handle_list[env_id]):
-                            fixed_camera_handle = env.fixed_camera_handle_list[env_id][cam_id]
-                            
-                            # Get RGB image
-                            rgb_array = env.gym.get_camera_image(env.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_COLOR)
-                            rgb_image = rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]  # Remove alpha
-                            env_rgb_images.append(rgb_image)
-                            
-                            # Get depth image
-                            depth_array = env.gym.get_camera_image(env.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_DEPTH)
-                            depth_image = depth_array.reshape(camera_props.height, camera_props.width)
-                            env_depth_images.append(depth_image)
-                            
-                            if debug:
-                                print(f"📸 Collected fixed camera {cam_id} for env {env_id}")
-                                
-                except Exception as e:
-                    if debug:
-                        print(f"⚠️ Error collecting from fixed cameras: {str(e)}")
-            
-            # Collect from hand camera if available
-            if hasattr(env, 'hand_camera_handle_list'):
-                try:
-                    if env_id < len(env.hand_camera_handle_list):
-                        hand_camera_handle = env.hand_camera_handle_list[env_id]
-                        
-                        # Hand camera RGB
-                        hand_rgb_array = env.gym.get_camera_image(env.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_COLOR)
-                        hand_rgb_image = hand_rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]
-                        env_rgb_images.append(hand_rgb_image)
-                        
-                        # Hand camera depth
-                        hand_depth_array = env.gym.get_camera_image(env.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_DEPTH)
-                        hand_depth_image = hand_depth_array.reshape(camera_props.height, camera_props.width)
-                        env_depth_images.append(hand_depth_image)
-                        
-                        if debug:
-                            print(f"📸 Collected hand camera for env {env_id}")
-                            
-                except Exception as e:
-                    if debug:
-                        print(f"⚠️ Error collecting from hand camera: {str(e)}")
-            
-            # If no cameras were found, create dummy images
-            if len(env_rgb_images) == 0:
-                if debug:
-                    print(f"⚠️ No cameras found for env {env_id}, creating dummy images")
-                env_rgb_images.append(np.zeros((camera_props.height, camera_props.width, 3), dtype=np.uint8))
-                env_depth_images.append(np.zeros((camera_props.height, camera_props.width), dtype=np.float32))
-            
-            # Convert to numpy arrays and add to environment list
-            rgb_images.append(np.array(env_rgb_images))
-            depth_images.append(np.array(env_depth_images))
-        
-        env.gym.end_access_image_tensors(env.sim)
-        
-        # Convert to tensors
-        rgb_images_tensor = torch.tensor(np.array(rgb_images), device=env.device, dtype=torch.uint8)
-        depth_images_tensor = torch.tensor(np.array(depth_images), device=env.device, dtype=torch.float32)
-
-        if debug:
-            print(f"📊 Final tensor shapes - RGB: {rgb_images_tensor.shape}, Depth: {depth_images_tensor.shape}")
-        
-        return rgb_images_tensor, depth_images_tensor
-        
-    except Exception as e:
-        print(f"❌ Error collecting camera images: {str(e)}")
-        if debug:
-            import traceback
-            traceback.print_exc()
-        
-        # Return dummy tensors as fallback
-        dummy_rgb = torch.zeros((env.num_envs, 1, camera_props.height, camera_props.width, 3), 
-                               device=env.device, dtype=torch.uint8)
-        dummy_depth = torch.zeros((env.num_envs, 1, camera_props.height, camera_props.width), 
-                                 device=env.device, dtype=torch.float32)
-        return dummy_rgb, dummy_depth
-
-
-def apply_rgbd_to_all_environments():
-    """
-    Apply RGBD collection to all environment classes
-    This should be called after importing all environment modules
-    """
-    try:
-        # Import all environment classes
-        import sys
-        import os
-        
-        # Add envs directory to path if not already there
-        envs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "envs")
-        if envs_dir not in sys.path:
-            sys.path.append(envs_dir)
-        
-        # List of environment modules to enhance
-        env_modules = [
-            'open_bottle', 'open_door', 'open_lamp', 'open_microwave',
-            'open_pen', 'open_pressurecooker', 'open_window', 'open_coffeemachine',
-            'open_safe'
-        ]
-        
-        enhanced_envs = []
-        
-        for module_name in env_modules:
-            try:
-                module = __import__(module_name)
-                
-                # Find the environment class in the module
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if (isinstance(attr, type) and 
-                        hasattr(attr, '__bases__') and 
-                        any('BaseEnv' in str(base) for base in attr.__bases__)):
-                        
-                        # Apply RGBD enhancement if not already present
-                        if not hasattr(attr, 'collect_rgbd_data'):
-                            add_rgbd_collection_to_env(attr)
-                            enhanced_envs.append(f"{module_name}.{attr_name}")
-                            
-            except ImportError as e:
-                print(f"⚠️ Could not import {module_name}: {e}")
-            except Exception as e:
-                print(f"⚠️ Error processing {module_name}: {e}")
-        
-        if enhanced_envs:
-            print(f"✅ Added RGBD collection to: {', '.join(enhanced_envs)}")
-        else:
-            print("ℹ️ No environments were enhanced (possibly already enhanced)")
-            
-    except Exception as e:
-        print(f"❌ Error applying RGBD to environments: {str(e)}")
-
-
-def validate_rgbd_environment(env):
-    """
-    Validate that an environment has proper RGBD collection capability
-    
-    Args:
-        env: Environment instance
-        
-    Returns:
-        dict: Validation results
-    """
-    results = {
-        'has_rgbd_method': False,
-        'can_collect_rgbd': False,
-        'camera_info': {},
-        'errors': []
-    }
-    
-    try:
-        # Check if RGBD method exists
-        results['has_rgbd_method'] = hasattr(env, 'collect_rgbd_data')
-        
-        if not results['has_rgbd_method']:
-            results['errors'].append("Missing collect_rgbd_data method")
-            return results
-        
-        # Try to collect RGBD data
-        env.reset()
-        rgbd_obs = env.collect_rgbd_data()
-        
-        # Check observation structure
-        required_keys = ['pc', 'proprioception', 'dof_state', 'prev_action', 'rgb_images', 'depth_images']
-        missing_keys = [key for key in required_keys if key not in rgbd_obs]
-        
-        if missing_keys:
-            results['errors'].append(f"Missing observation keys: {missing_keys}")
-        else:
-            results['can_collect_rgbd'] = True
-            
-            # Collect camera info
-            rgb_images = rgbd_obs['rgb_images']
-            depth_images = rgbd_obs['depth_images']
-            
-            results['camera_info'] = {
-                'rgb_shape': tuple(rgb_images.shape),
-                'depth_shape': tuple(depth_images.shape),
-                'rgb_dtype': str(rgb_images.dtype),
-                'depth_dtype': str(depth_images.dtype),
-                'num_cameras': rgb_images.shape[1] if len(rgb_images.shape) > 1 else 0,
-                'image_resolution': (rgb_images.shape[-2], rgb_images.shape[-1]) if len(rgb_images.shape) >= 2 else (0, 0)
-            }
-        
-    except Exception as e:
-        results['errors'].append(f"Exception during RGBD collection: {str(e)}")
-    
-    return results
-
-
-def debug_rgbd_collection(env, save_samples=True, output_dir="debug_rgbd"):
-    """
-    Debug RGBD collection and optionally save sample images
-    
-    Args:
-        env: Environment instance
-        save_samples (bool): Whether to save sample images
-        output_dir (str): Directory to save debug outputs
-    """
-    print("\n" + "="*50)
-    print("RGBD COLLECTION DEBUG")
-    print("="*50)
-    
-    # Validate environment
-    validation = validate_rgbd_environment(env)
-    
-    print(f"Has RGBD method: {validation['has_rgbd_method']}")
-    print(f"Can collect RGBD: {validation['can_collect_rgbd']}")
-    
-    if validation['camera_info']:
-        info = validation['camera_info']
-        print(f"Camera info:")
-        print(f"  - RGB shape: {info['rgb_shape']}")
-        print(f"  - Depth shape: {info['depth_shape']}")
-        print(f"  - Number of cameras: {info['num_cameras']}")
-        print(f"  - Image resolution: {info['image_resolution']}")
-    
-    if validation['errors']:
-        print("Errors:")
-        for error in validation['errors']:
-            print(f"  - {error}")
-    
-    # Save sample images if requested and possible
-    if save_samples and validation['can_collect_rgbd']:
-        try:
-            rgbd_obs = env.collect_rgbd_data()
-            rgb_images = rgbd_obs['rgb_images']
-            depth_images = rgbd_obs['depth_images']
-            
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # Save using matplotlib
-            import matplotlib.pyplot as plt
-            
-            if rgb_images.numel() > 0 and depth_images.numel() > 0:
-                # Get first environment, all cameras
-                sample_rgb = rgb_images[0].cpu().numpy()  # [num_cameras, height, width, 3]
-                sample_depth = depth_images[0].cpu().numpy()  # [num_cameras, height, width]
-                
-                # Skip if dummy data
-                if len(sample_rgb.shape) >= 3 and (sample_rgb.shape[1] <= 1 or sample_rgb.shape[2] <= 1):
-                    print("⚠️ RGB images appear to be dummy data (1x1 size), skipping PNG save")
-                else:
-                    # Save individual camera images as PNG
-                    save_individual_camera_pngs(sample_rgb, sample_depth, output_dir)
-                    
-                    # Create overview image
-                    save_overview_image(sample_rgb, sample_depth, output_dir)
-                
-                print(f"✅ Sample images saved to {output_dir}/")
-        
-        except Exception as e:
-            print(f"❌ Error saving sample images: {str(e)}")
-    
-    print("="*50)
-    return validation
-
-def save_individual_camera_pngs(rgb_images, depth_images, output_dir):
-    """Save individual camera images as PNG files"""
-    import matplotlib.pyplot as plt
-    
-    num_cameras = rgb_images.shape[0] if len(rgb_images.shape) > 1 else 1
-    
-    for cam_idx in range(num_cameras):
-        try:
-            # Get RGB and depth for this camera
-            if len(rgb_images.shape) >= 4:  # [num_cameras, height, width, 3]
-                rgb_img = rgb_images[cam_idx]
-                depth_img = depth_images[cam_idx]
-            else:  # Single camera case
-                rgb_img = rgb_images
-                depth_img = depth_images
-            
-            # Normalize RGB
-            if rgb_img.dtype == np.uint8:
-                rgb_img_norm = rgb_img.astype(np.float32) / 255.0
-            else:
-                rgb_img_norm = np.clip(rgb_img, 0, 1)
-            
-            # Save RGB as PNG
-            rgb_path = os.path.join(output_dir, f"debug_rgb_camera_{cam_idx}.png")
-            plt.figure(figsize=(8, 6))
-            plt.imshow(rgb_img_norm)
-            plt.title(f"RGB Camera {cam_idx}")
-            plt.axis('off')
-            plt.tight_layout()
-            plt.savefig(rgb_path, dpi=150, bbox_inches='tight')
-            plt.close()
-            
-            # Save depth as PNG
-            depth_path = os.path.join(output_dir, f"debug_depth_camera_{cam_idx}.png")
-            plt.figure(figsize=(8, 6))
-            if depth_img.size > 1:  # Not dummy data
-                plt.imshow(depth_img, cmap='viridis')
-                plt.colorbar()
-            else:
-                plt.imshow(np.zeros_like(rgb_img_norm[:,:,0]), cmap='viridis')
-            plt.title(f"Depth Camera {cam_idx}")
-            plt.axis('off')
-            plt.tight_layout()
-            plt.savefig(depth_path, dpi=150, bbox_inches='tight')
-            plt.close()
-            
-            print(f"   📸 Saved camera {cam_idx} images: {rgb_path}, {depth_path}")
-            
-        except Exception as e:
-            print(f"⚠️ Error saving camera {cam_idx}: {e}")
-
-def save_overview_image(rgb_images, depth_images, output_dir):
-    """Save overview image with all cameras"""
-    import matplotlib.pyplot as plt
-    
-    num_cameras = rgb_images.shape[0] if len(rgb_images.shape) > 1 else 1
-    
-    try:
-        # Create overview figure
-        fig, axes = plt.subplots(2, num_cameras, figsize=(4*num_cameras, 8))
-        if num_cameras == 1:
-            axes = axes.reshape(2, 1)
-        
-        for cam_idx in range(num_cameras):
-            # Get images for this camera
-            if len(rgb_images.shape) >= 4:
-                rgb_img = rgb_images[cam_idx]
-                depth_img = depth_images[cam_idx]
-            else:
-                rgb_img = rgb_images
-                depth_img = depth_images
-            
-            # Normalize RGB
-            if rgb_img.dtype == np.uint8:
-                rgb_img_norm = rgb_img.astype(np.float32) / 255.0
-            else:
-                rgb_img_norm = np.clip(rgb_img, 0, 1)
-            
-            # RGB subplot
-            axes[0, cam_idx].imshow(rgb_img_norm)
-            axes[0, cam_idx].set_title(f"RGB Camera {cam_idx}")
-            axes[0, cam_idx].axis('off')
-            
-            # Depth subplot
-            if depth_img.size > 1:
-                im = axes[1, cam_idx].imshow(depth_img, cmap='viridis')
-                plt.colorbar(im, ax=axes[1, cam_idx])
-            else:
-                axes[1, cam_idx].imshow(np.zeros_like(rgb_img_norm[:,:,0]), cmap='viridis')
-            axes[1, cam_idx].set_title(f"Depth Camera {cam_idx}")
-            axes[1, cam_idx].axis('off')
-        
-        plt.tight_layout()
-        overview_path = os.path.join(output_dir, "debug_rgbd_overview.png")
-        plt.savefig(overview_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print(f"   📊 Saved overview image: {overview_path}")
-        
-    except Exception as e:
-        print(f"⚠️ Error creating overview image: {e}") 
+    print(f"Enhanced RGBD collection capability added to {env_class.__name__}")

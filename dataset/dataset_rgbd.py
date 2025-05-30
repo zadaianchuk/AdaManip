@@ -1,22 +1,29 @@
 import numpy as np
 import torch
 import pickle
+import os
+import json
+from PIL import Image
 from pytorch3d.ops import sample_farthest_points
 from pytorch3d.structures import Pointclouds
 from pytorch3d.vis.plotly_vis import AxisArgs, plot_batch_individually, plot_scene
 import zarr
 import ipdb
-import os
+import matplotlib.pyplot as plt
 from .dataset import obs_wrapper, nested_dict_save, create_sample_indices, sample_sequence
 
 class RGBDEpisodeBuffer:
-    """Episode buffer that stores RGBD observations along with other data"""
+    """Episode buffer that stores RGBD observations along with camera parameters"""
     def __init__(self):
         self.pcs = []
         self.env_state = []
         self.action = []
         self.rgb_images = []
         self.depth_images = []
+        # Camera parameter storage
+        self.camera_intrinsics = []  # Camera intrinsic matrices [fx, fy, cx, cy], fx and fy are Focal Lengths in pixels
+        self.camera_extrinsics = []  # Camera extrinsic matrices (world-to-camera transform), inv of camera_view_matrix
+        self.camera_info = []        # Additional camera metadata
 
     def add(self, pc, env_state, action):
         """Add standard observation (for backward compatibility)"""
@@ -26,9 +33,13 @@ class RGBDEpisodeBuffer:
         # Add empty RGB/depth placeholders for compatibility
         self.rgb_images.append(np.zeros((1, 1, 3), dtype=np.uint8))
         self.depth_images.append(np.zeros((1, 1), dtype=np.float32))
+        # Add empty camera parameter placeholders
+        self.camera_intrinsics.append(np.zeros((1, 4), dtype=np.float32))  # [fx, fy, cx, cy]
+        self.camera_extrinsics.append(np.eye(4, dtype=np.float32).reshape(1, 4, 4))
+        self.camera_info.append([{"type": "dummy", "id": 0}])
 
-    def add_rgbd(self, pc, env_state, action, rgb_images, depth_images):
-        """Add RGBD observation with images"""
+    def add_rgbd(self, pc, env_state, action, rgb_images, depth_images, camera_intrinsics=None, camera_extrinsics=None, camera_info=None):
+        """Add RGBD observation with images and camera parameters"""
         self.pcs.append(pc.cpu().numpy())
         self.env_state.append(env_state.cpu().numpy())
         self.action.append(action.cpu().numpy())
@@ -46,9 +57,36 @@ class RGBDEpisodeBuffer:
         if isinstance(depth_images, list):
             depth_images = np.array(depth_images)
         self.depth_images.append(depth_images)
+        
+        # Handle camera parameters
+        if camera_intrinsics is not None:
+            if isinstance(camera_intrinsics, torch.Tensor):
+                camera_intrinsics = camera_intrinsics.cpu().numpy()
+            self.camera_intrinsics.append(camera_intrinsics)
+        else:
+            raise ValueError("camera_intrinsics is not provided")
+        
+        if camera_extrinsics is not None:
+            if isinstance(camera_extrinsics, torch.Tensor):
+                camera_extrinsics = camera_extrinsics.cpu().numpy()
+            self.camera_extrinsics.append(camera_extrinsics)
+        else:
+            # Create default extrinsics (identity matrices)
+            num_cameras = rgb_images.shape[0] if len(rgb_images.shape) > 2 else 1
+            default_extrinsics = np.tile(np.eye(4, dtype=np.float32), (num_cameras, 1, 1))
+            self.camera_extrinsics.append(default_extrinsics)
+        
+        
+        if camera_info is not None:
+            self.camera_info.append(camera_info)
+        else:
+            # Create default camera info
+            num_cameras = rgb_images.shape[0] if len(rgb_images.shape) > 2 else 1
+            default_info = [{"type": "unknown", "id": i} for i in range(num_cameras)]
+            self.camera_info.append(default_info)
 
 class RGBDExperience:
-    """Experience replay buffer that handles RGBD data"""
+    """Experience replay buffer that handles RGBD data with camera parameters"""
     def __init__(self, sample_pcs_num=1000):
         self.sample_pcs_num = sample_pcs_num
         self.data = {
@@ -56,7 +94,10 @@ class RGBDExperience:
             "env_state": [], 
             "action": [],
             "rgb_images": [],
-            "depth_images": []
+            "depth_images": [],
+            "camera_intrinsics": [],
+            "camera_extrinsics": [],
+            "camera_info": []
         }
         self.meta = {"episode_ends": []}
     
@@ -71,349 +112,214 @@ class RGBDExperience:
             self.data["action"] = np.array(episode.action)
             self.data["rgb_images"] = np.array(episode.rgb_images)
             self.data["depth_images"] = np.array(episode.depth_images)
+            self.data["camera_intrinsics"] = np.array(episode.camera_intrinsics)
+            self.data["camera_extrinsics"] = np.array(episode.camera_extrinsics)
+            # Camera info is stored as a list of lists (can't easily convert to numpy array)
+            self.data["camera_info"] = episode.camera_info
         else:
             self.data["pcs"] = np.concatenate([self.data["pcs"], np.array(episode.pcs)])
             self.data["env_state"] = np.concatenate([self.data["env_state"], np.array(episode.env_state)])
             self.data["action"] = np.concatenate([self.data["action"], np.array(episode.action)])
             self.data["rgb_images"] = np.concatenate([self.data["rgb_images"], np.array(episode.rgb_images)])
             self.data["depth_images"] = np.concatenate([self.data["depth_images"], np.array(episode.depth_images)])
+            self.data["camera_intrinsics"] = np.concatenate([self.data["camera_intrinsics"], np.array(episode.camera_intrinsics)])
+            self.data["camera_extrinsics"] = np.concatenate([self.data["camera_extrinsics"], np.array(episode.camera_extrinsics)])
+            self.data["camera_info"].extend(episode.camera_info)
         
         new_end = self.data["pcs"].shape[0]
         self.meta["episode_ends"].append(new_end)
 
-    def save(self, path, save_png_samples=True, max_png_samples=10):
-        """Save RGBD data and meta in zarr format, optionally save sample PNG images"""
-        self.meta["episode_ends"] = np.array(self.meta["episode_ends"])
-        zarr_group = zarr.open(path, 'w')
-        nested_dict_save(zarr_group, self.data, 'data')
-        nested_dict_save(zarr_group, self.meta, 'meta')
+    def save_png_npy(self, path, fixed_cameras_only=True):
+        """Save RGBD data using d3fields structure: separate camera directories with color/depth subdirs
         
-        # Save additional metadata about RGBD format
-        rgbd_meta = {
-            "has_rgbd": True,
-            "rgb_shape": self.data["rgb_images"].shape if len(self.data["rgb_images"]) > 0 else (0,),
-            "depth_shape": self.data["depth_images"].shape if len(self.data["depth_images"]) > 0 else (0,),
-            "total_episodes": len(self.meta["episode_ends"]),
-            "total_steps": self.data["pcs"].shape[0] if len(self.data["pcs"]) > 0 else 0
-        }
-        nested_dict_save(zarr_group, rgbd_meta, 'rgbd_meta')
-        print(f"Saved RGBD dataset with {rgbd_meta['total_episodes']} episodes and {rgbd_meta['total_steps']} steps")
+        Args:
+            path: Base directory path to save the dataset
+            fixed_cameras_only: If True, only save data from fixed cameras (exclude hand cameras)
+        """
+        print(f"Saving RGBD dataset in d3fields format to {path}")
+        if fixed_cameras_only:
+            print("📌 Using fixed cameras only (excluding hand cameras with time-varying extrinsics)")
         
-        # Save sample RGB images as PNG files
-        if save_png_samples and len(self.data["rgb_images"]) > 0:
-            self._save_png_samples(path, max_samples=max_png_samples)
-
-    def _save_png_samples(self, base_path, max_samples=10):
-        """Save sample RGB and depth images as PNG files"""
-        try:
-            import matplotlib.pyplot as plt
+        # Create base directory
+        base_dir = path.replace('.zarr', '') if path.endswith('.zarr') else path
+        os.makedirs(base_dir, exist_ok=True)
+        
+        # Get data shapes
+        rgb_data = self.data["rgb_images"]
+        depth_data = self.data["depth_images"]
+        camera_info_data = self.data["camera_info"]
+        
+        if len(rgb_data) == 0:
+            print("No RGB data to save")
+            return
+        
+        # Determine number of cameras and filter for fixed cameras only
+        num_steps = len(rgb_data)
+        total_cameras = rgb_data[0].shape[0] if len(rgb_data[0].shape) > 1 else 1
+        
+        # Filter cameras based on camera_info to identify fixed vs hand cameras
+        fixed_camera_indices = []
+        if fixed_cameras_only and len(camera_info_data) > 0:
+            # Check first step's camera info to identify fixed cameras
+            first_step_info = camera_info_data[0]
+            for cam_idx, cam_info in enumerate(first_step_info):
+                if cam_info.get('type', 'unknown') != 'hand':
+                    fixed_camera_indices.append(cam_idx)
             
-            # Create PNG samples directory
-            png_dir = os.path.join(os.path.dirname(base_path), "png_samples")
-            os.makedirs(png_dir, exist_ok=True)
+            if not fixed_camera_indices:
+                # Fallback: assume all cameras are fixed if no hand cameras identified
+                fixed_camera_indices = list(range(total_cameras))
+                print("⚠️ No hand cameras identified, using all cameras")
+        else:
+            # Use all cameras if not filtering
+            fixed_camera_indices = list(range(total_cameras))
+        
+        num_cameras = len(fixed_camera_indices)
+        print(f"Saving {num_steps} steps with {num_cameras} fixed cameras (indices: {fixed_camera_indices})")
+        
+        # Create camera directories and subdirectories for fixed cameras only
+        for i, cam_idx in enumerate(fixed_camera_indices):
+            cam_dir = os.path.join(base_dir, f'camera_{i}')  # Use sequential numbering for output
+            color_dir = os.path.join(cam_dir, 'color')
+            depth_dir = os.path.join(cam_dir, 'depth')
+            os.makedirs(color_dir, exist_ok=True)
+            os.makedirs(depth_dir, exist_ok=True)
+        
+        # Save images for each step and fixed camera
+        for step_idx in range(num_steps):
+            rgb_step = rgb_data[step_idx]  # Shape: [num_cameras, height, width, 3]
+            depth_step = depth_data[step_idx]  # Shape: [num_cameras, height, width]
             
-            rgb_data = self.data["rgb_images"]
-            depth_data = self.data["depth_images"]
+            if rgb_step.size == 0:
+                continue
             
-            # Sample indices evenly across the dataset
-            total_steps = rgb_data.shape[0]
-            if total_steps == 0:
-                print("⚠️ No RGB data to save as PNG")
-                return
-            
-            sample_indices = np.linspace(0, total_steps-1, min(max_samples, total_steps), dtype=int)
-            
-            print(f"💾 Saving {len(sample_indices)} sample RGB images as PNG...")
-            
-            for i, step_idx in enumerate(sample_indices):
-                rgb_step = rgb_data[step_idx]  # Shape: [num_cameras, height, width, 3]
-                depth_step = depth_data[step_idx]  # Shape: [num_cameras, height, width]
-                
-                if rgb_step.size == 0:
-                    continue
-                
-                num_cameras = rgb_step.shape[0] if len(rgb_step.shape) > 1 else 1
-                
-                # Create figure for this time step
-                fig, axes = plt.subplots(2, num_cameras, figsize=(4*num_cameras, 8))
-                if num_cameras == 1:
-                    axes = axes.reshape(2, 1)
-                elif num_cameras == 0:
-                    continue
-                
-                for cam_idx in range(num_cameras):
-                    try:
-                        # Get RGB and depth for this camera
-                        if len(rgb_step.shape) >= 4:  # [num_cameras, height, width, 3]
-                            rgb_img = rgb_step[cam_idx]
-                            depth_img = depth_step[cam_idx]
-                        else:  # Fallback for different shapes
-                            rgb_img = rgb_step
-                            depth_img = depth_step
-                            
-                        # Normalize RGB if needed
-                        if rgb_img.dtype == np.uint8:
-                            rgb_img_norm = rgb_img.astype(np.float32) / 255.0
-                        else:
-                            rgb_img_norm = rgb_img
-                        
-                        # RGB image
-                        axes[0, cam_idx].imshow(rgb_img_norm)
-                        axes[0, cam_idx].set_title(f"RGB Camera {cam_idx} (Step {step_idx})")
-                        axes[0, cam_idx].axis('off')
-                        
-                        # Depth image
-                        if depth_img.size > 1:  # Not dummy data
-                            im = axes[1, cam_idx].imshow(depth_img, cmap='viridis')
-                            plt.colorbar(im, ax=axes[1, cam_idx])
-                        else:
-                            # Handle dummy depth data
-                            axes[1, cam_idx].imshow(np.zeros_like(rgb_img_norm[:,:,0]), cmap='viridis')
-                        axes[1, cam_idx].set_title(f"Depth Camera {cam_idx} (Step {step_idx})")
-                        axes[1, cam_idx].axis('off')
-                        
-                    except Exception as e:
-                        print(f"⚠️ Error processing camera {cam_idx}: {e}")
-                        continue
-                
-                plt.tight_layout()
-                png_path = os.path.join(png_dir, f"sample_{i:03d}_step_{step_idx:04d}.png")
-                plt.savefig(png_path, dpi=150, bbox_inches='tight')
-                plt.close()
-            
-            print(f"✅ Saved {len(sample_indices)} PNG samples to {png_dir}/")
-            
-            # Also save a summary image with all RGB samples in a grid
-            self._save_rgb_summary_grid(png_dir, sample_indices)
-            
-        except Exception as e:
-            print(f"❌ Error saving PNG samples: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def _save_rgb_summary_grid(self, png_dir, sample_indices):
-        """Save a summary grid of all RGB samples"""
-        try:
-            import matplotlib.pyplot as plt
-            
-            rgb_data = self.data["rgb_images"]
-            
-            # Create a grid layout
-            n_samples = len(sample_indices)
-            cols = min(5, n_samples)  # Max 5 columns
-            rows = (n_samples + cols - 1) // cols
-            
-            fig, axes = plt.subplots(rows, cols, figsize=(3*cols, 3*rows))
-            if n_samples == 1:
-                axes = [axes]
-            elif rows == 1:
-                axes = [axes]
-            else:
-                axes = axes.flatten()
-            
-            for i, step_idx in enumerate(sample_indices):
-                if i < len(axes):
-                    rgb_step = rgb_data[step_idx]
-                    
-                    # Use first camera if multiple cameras
+            for i, cam_idx in enumerate(fixed_camera_indices):
+                try:
+                    # Get RGB and depth for this fixed camera
                     if len(rgb_step.shape) >= 4:  # [num_cameras, height, width, 3]
-                        rgb_img = rgb_step[0]
-                    else:
+                        rgb_img = rgb_step[cam_idx]
+                        depth_img = depth_step[cam_idx]
+                    else:  # Single camera case
                         rgb_img = rgb_step
+                        depth_img = depth_step
                     
-                    # Normalize if needed
-                    if rgb_img.dtype == np.uint8:
-                        rgb_img = rgb_img.astype(np.float32) / 255.0
+                    # Save RGB image as PNG in color directory
+                    if rgb_img.size > 1:  # Not dummy data
+                        rgb_filename = f"{step_idx}.png"
+                        rgb_path = os.path.join(base_dir, f'camera_{i}', 'color', rgb_filename)
+                        
+                        # Ensure RGB is in correct format
+                        if rgb_img.dtype != np.uint8:
+                            if rgb_img.max() <= 1.0:
+                                rgb_img = (rgb_img * 255).astype(np.uint8)
+                            else:
+                                rgb_img = rgb_img.astype(np.uint8)
+                        
+                        # Save using PIL
+                        if len(rgb_img.shape) == 3 and rgb_img.shape[2] == 3:
+                            Image.fromarray(rgb_img).save(rgb_path)
                     
-                    axes[i].imshow(rgb_img)
-                    axes[i].set_title(f"Step {step_idx}")
-                    axes[i].axis('off')
-            
-            # Hide unused subplots
-            for i in range(len(sample_indices), len(axes)):
-                axes[i].axis('off')
-            
-            plt.tight_layout()
-            summary_path = os.path.join(png_dir, "rgb_summary_grid.png")
-            plt.savefig(summary_path, dpi=150, bbox_inches='tight')
-            plt.close()
-            
-            print(f"✅ Saved RGB summary grid to {summary_path}")
-            
-        except Exception as e:
-            print(f"⚠️ Error creating RGB summary grid: {e}")
-
-class RGBDManipDataset(torch.utils.data.Dataset):
-    """PyTorch dataset for RGBD manipulation data"""
-    def __init__(self,
-                 dataset_path: list,
-                 pred_horizon: int,
-                 obs_horizon: int,
-                 action_horizon: int,
-                 use_images: bool = True):
+                    # Save depth image (as 16-bit PNG to preserve precision)
+                    depth_filename = f"{step_idx}.png"
+                    depth_path = os.path.join(base_dir, f"camera_{i}", "depth", depth_filename)
+                    # Convert to 16-bit for better precision
+                    assert depth_img.dtype == np.float32
+                    # Scale to 16-bit range while preserving original values
+                    depth_img_16 = (np.clip(-depth_img, 0, 2.5) * 1000).astype(np.uint16)  # Convert meters to millimeters
+                    Image.fromarray(depth_img_16).save(depth_path)
+                
+                except Exception as e:
+                    print(f"Error saving images for step {step_idx}, camera {cam_idx}: {e}")
+                    continue
         
-        print("Using RGBD Manip Dataset")
-        print(f"Loading RGBD data from {dataset_path}")
-        
-        pcs_list = []
-        action_data_list = []
-        env_state_list = []
-        rgb_images_list = []
-        depth_images_list = []
-        episode_end_list = []
-
-        init = 0
-        for data_path in dataset_path:
-            data = zarr.open(data_path, 'r')
-            ends = data['meta']['episode_ends'][:]
-            episode_end_list.append(ends + init)
-            init += ends[-1]
+        # Save camera parameters for each fixed camera
+        print("Saving camera parameters for fixed cameras...")
+        for i, cam_idx in enumerate(fixed_camera_indices):
+            cam_dir = os.path.join(base_dir, f'camera_{i}')
             
-            pcs_list.append(data['data']['pcs'])
-            action_data_list.append(data['data']['action'])
-            env_state_list.append(data['data']['env_state'])
-            
-            if use_images and 'rgb_images' in data['data']:
-                rgb_images_list.append(data['data']['rgb_images'])
-                depth_images_list.append(data['data']['depth_images'])
+            # Extract camera parameters for this fixed camera
+            if len(self.data["camera_intrinsics"]) > 0:
+                # Get intrinsics for this camera (assuming they're consistent across steps)
+                intrinsics_all_steps = self.data["camera_intrinsics"]
+                if len(intrinsics_all_steps[0].shape) > 1 and intrinsics_all_steps[0].shape[0] > cam_idx:
+                    camera_params = intrinsics_all_steps[0][cam_idx]  # [fx, fy, cx, cy]
+                else:
+                    raise ValueError(f"Camera parameters not found for camera {cam_idx}")
+                
+                np.save(os.path.join(cam_dir, 'camera_params.npy'), camera_params)
             else:
-                # Create dummy images if not available
-                dummy_rgb = np.zeros((len(data['data']['pcs']), 1, 1, 3), dtype=np.uint8)
-                dummy_depth = np.zeros((len(data['data']['pcs']), 1, 1), dtype=np.float32)
-                rgb_images_list.append(dummy_rgb)
-                depth_images_list.append(dummy_depth)
-
-        # Concatenate all data
-        pcs = np.concatenate(pcs_list, axis=0)
-        action_data = np.concatenate(action_data_list, axis=0)
-        env_state = np.concatenate(env_state_list, axis=0)
-        rgb_images = np.concatenate(rgb_images_list, axis=0)
-        depth_images = np.concatenate(depth_images_list, axis=0)
+                raise ValueError("Camera intrinsics not found")
+            
+            if len(self.data["camera_extrinsics"]) > 0:
+                extrinsics_all_steps = self.data["camera_extrinsics"]
+                if len(extrinsics_all_steps[0].shape) > 2 and extrinsics_all_steps[0].shape[0] > cam_idx:
+                    camera_extrinsics = extrinsics_all_steps[0][cam_idx]  # [4, 4]
+                else:
+                    raise ValueError(f"Camera extrinsics not found for camera {cam_idx}")
+                
+                np.save(os.path.join(cam_dir, 'camera_extrinsics.npy'), camera_extrinsics)
+            else:
+                raise ValueError("Camera extrinsics not found")
+        # Filter other data to match fixed cameras only
+        filtered_camera_intrinsics = []
+        filtered_camera_extrinsics = []
+        filtered_camera_info = []
         
-        action_train = action_data
-        train_data = {
-            'pcs': pcs,
-            'env_state': env_state,
-            'action': action_train,
-            'rgb_images': rgb_images,
-            'depth_images': depth_images
+        for step_idx in range(len(self.data["camera_intrinsics"])):
+            step_intrinsics = [self.data["camera_intrinsics"][step_idx][cam_idx] for cam_idx in fixed_camera_indices]
+            step_extrinsics = [self.data["camera_extrinsics"][step_idx][cam_idx] for cam_idx in fixed_camera_indices]
+            step_info = [self.data["camera_info"][step_idx][cam_idx] for cam_idx in fixed_camera_indices]
+            
+            filtered_camera_intrinsics.append(step_intrinsics)
+            filtered_camera_extrinsics.append(step_extrinsics)
+            filtered_camera_info.append(step_info)
+        
+        # Save other data as NPY files in base directory
+        data_files = {
+            'pcs.npy': self.data["pcs"],
+            'env_state.npy': self.data["env_state"], 
+            'action.npy': self.data["action"],
+            'episode_ends.npy': np.array(self.meta["episode_ends"]),    
+            'camera_intrinsics_all_steps.npy': np.array(filtered_camera_intrinsics),
+            'camera_extrinsics_all_steps.npy': np.array(filtered_camera_extrinsics)
         }
         
-        episode_ends = np.concatenate(episode_end_list, axis=0)
+        print("Saving additional data files...")
+        for filename, data in data_files.items():
+            np.save(os.path.join(base_dir, filename), data)
         
-        # Compute start and end of each state-action sequence
-        indices = create_sample_indices(
-            episode_ends=episode_ends,
-            obs_length=obs_horizon,
-            action_length=pred_horizon,
-            pad_after=pred_horizon
-        )
+        # Save filtered camera info as JSON
+        with open(os.path.join(base_dir, 'camera_info.json'), 'w') as f:
+            json.dump(filtered_camera_info, f, indent=2)
         
-        print(f"RGBD dataset loaded: {len(indices)} sequences")
-        print(f"RGB images shape: {rgb_images.shape}")
-        print(f"Depth images shape: {depth_images.shape}")
-        
-        self.indices = indices
-        self.train_data = train_data
-        self.pred_horizon = pred_horizon
-        self.action_horizon = action_horizon
-        self.obs_horizon = obs_horizon
-        self.use_images = use_images
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        # Get the start/end indices for this datapoint
-        action_start_idx, action_end_idx, obs_start_idx, obs_end_idx = self.indices[idx]
-
-        # Sample sequence from training data - pass all data at once
-        sample = sample_sequence(
-            train_data=self.train_data,
-            obs_length=self.obs_horizon,
-            action_length=self.pred_horizon,
-            action_start_idx=action_start_idx, 
-            action_end_idx=action_end_idx,
-            obs_start_idx=obs_start_idx, 
-            obs_end_idx=obs_end_idx
-        )
-        
-        # Convert to tensors
-        pcs_tensor = torch.from_numpy(sample['pcs']).float()
-        env_state_tensor = torch.from_numpy(sample['env_state']).float()
-        action_tensor = torch.from_numpy(sample['action']).float()
-        
-        # Handle RGBD data
-        if self.use_images and 'rgb_images' in sample:
-            rgb_tensor = torch.from_numpy(sample['rgb_images']).float() / 255.0  # Normalize to [0,1]
-            depth_tensor = torch.from_numpy(sample['depth_images']).float()
-        else:
-            # Create dummy tensors if no RGBD data
-            rgb_tensor = torch.zeros((self.obs_horizon, 1, 1, 3), dtype=torch.float32)
-            depth_tensor = torch.zeros((self.obs_horizon, 1, 1), dtype=torch.float32)
-
-        return {
-            'pcs': pcs_tensor,
-            'env_state': env_state_tensor,
-            'action': action_tensor,
-            'rgb_images': rgb_tensor,
-            'depth_images': depth_tensor
+        # Save dataset info file (similar to d3fields format)
+        dataset_info = {
+            "format": "d3fields_compatible",
+            "num_frames": num_steps,
+            "num_cameras": num_cameras,
+            "fixed_cameras_only": fixed_cameras_only,
+            "fixed_camera_indices": fixed_camera_indices,
+            "rgb_shape": f"({num_steps}, {num_cameras}, H, W, 3)",
+            "depth_format": "PNG RGB",
+            "color_format": "PNG RGB",
+            "camera_params_format": "numpy [fx, fy, cx, cy]",
+            "camera_extrinsics_format": "numpy 4x4 world-to-camera (static)",
+            "total_episodes": len(self.meta["episode_ends"]),
+            "storage_structure": "camera_X/color/*.png, camera_X/depth/*.png",
+            "note": "Hand cameras excluded due to time-varying extrinsics"
         }
-
-def load_rgbd_dataset(dataset_paths: list, **kwargs):
-    """Convenience function to load RGBD dataset"""
-    return RGBDManipDataset(dataset_paths, **kwargs)
-
-def merge_rgbd_dataset(path_list, to_path):
-    """Merge multiple RGBD datasets into one"""
-    for i, path in enumerate(path_list):
-        dataset_root = zarr.open(path, 'r')
-        if i == 0:
-            pcs_data = dataset_root['data']['pcs'][:]
-            pose_data = dataset_root['data']['env_state'][:]
-            action_data = dataset_root['data']['action'][:]
-            rgb_data = dataset_root['data']['rgb_images'][:] if 'rgb_images' in dataset_root['data'] else None
-            depth_data = dataset_root['data']['depth_images'][:] if 'depth_images' in dataset_root['data'] else None
-            meta = dataset_root['meta']['episode_ends'][:]
-            cur_len = dataset_root['meta']['episode_ends'][-1]
-        else:
-            pcs_data = np.concatenate([pcs_data, dataset_root['data']['pcs'][:]])
-            pose_data = np.concatenate([pose_data, dataset_root['data']['env_state'][:]])
-            action_data = np.concatenate([action_data, dataset_root['data']['action'][:]])
-            
-            if rgb_data is not None and 'rgb_images' in dataset_root['data']:
-                rgb_data = np.concatenate([rgb_data, dataset_root['data']['rgb_images'][:]])
-                depth_data = np.concatenate([depth_data, dataset_root['data']['depth_images'][:]])
-            
-            new_meta = dataset_root['meta']['episode_ends'][:] + cur_len
-            cur_len += dataset_root['meta']['episode_ends'][-1]
-            meta = np.concatenate([meta, new_meta])
         
-        print(f"Merged {path}: pcs {pcs_data.shape}, pose {pose_data.shape}, action {action_data.shape}")
-        if rgb_data is not None:
-            print(f"  RGB {rgb_data.shape}, depth {depth_data.shape}")
-
-    # Save merged data
-    all_data = {
-        "pcs": pcs_data, 
-        "env_state": pose_data, 
-        "action": action_data
-    }
-    if rgb_data is not None:
-        all_data["rgb_images"] = rgb_data
-        all_data["depth_images"] = depth_data
-    
-    all_meta = {"episode_ends": meta}
-    zarr_group = zarr.open(to_path, 'w')
-    nested_dict_save(zarr_group, all_data, 'data')
-    nested_dict_save(zarr_group, all_meta, 'meta')
-    
-    # Add RGBD metadata
-    rgbd_meta = {
-        "has_rgbd": rgb_data is not None,
-        "merged_from": path_list,
-        "total_episodes": len(meta),
-        "total_steps": pcs_data.shape[0]
-    }
-    nested_dict_save(zarr_group, rgbd_meta, 'rgbd_meta')
-    print(f"Merged RGBD dataset saved to {to_path}") 
+        with open(os.path.join(base_dir, 'dataset_info.txt'), 'w') as f:
+            f.write("D3Fields Compatible Dataset Info\n")
+            f.write("=" * 40 + "\n\n")
+            for key, value in dataset_info.items():
+                f.write(f"{key}: {value}\n")
+        
+        print(f"Saved RGBD dataset in d3fields format:")
+        print(f"   Base directory: {base_dir}")
+        print(f"   Frames: {num_steps}")
+        print(f"   Fixed cameras: {num_cameras}")
+        print(f"   RGB: camera_X/color/*.png")
+        print(f"   Depth: camera_X/depth/*.png")
+        print(f"   Camera params: camera_X/camera_params.npy")
+        print(f"   Static extrinsics only (hand cameras excluded)")

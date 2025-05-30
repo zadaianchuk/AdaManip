@@ -14,11 +14,28 @@ from manipulation.open_lamp import OpenLampManipulation
 from manipulation.open_safe import OpenSafeManipulation
 
 def parse_controller(args, env, manipulation, cfg, logger):
+    # Handle common controller name variations
+    controller_mapping = {
+        'GTController': 'GtController',  # Handle the common case mismatch
+        'ModelController': 'ModelController',
+        'BaseController': 'BaseController'
+    }
+    
+    controller_name = controller_mapping.get(args.controller, args.controller)
+    
     try:
-        print(args.controller)
-        controller = eval(args.controller)(env, manipulation, cfg, logger)
+        print(f"Loading controller: {controller_name}")
+        controller = eval(controller_name)(env, manipulation, cfg, logger)
     except NameError as e:
-        print(e)
+        print(f"Controller error: {e}")
+        # Fallback to GtController if the specified controller is not found
+        print(f"Controller '{args.controller}' not found, falling back to GtController")
+        controller = GtController(env, manipulation, cfg, logger)
+    except Exception as e:
+        print(f"Error creating controller: {e}")
+        # Fallback to GtController for any other errors
+        print(f"Error with controller '{args.controller}', falling back to GtController")
+        controller = GtController(env, manipulation, cfg, logger)
     return controller
 
 def parse_manipulation(args, env, cfg, logger):

@@ -828,9 +828,6 @@ class OpenSafe(BaseEnv):
 
     def collect_diff_data(self):
         pc = self.compute_point_cloud_state(depth_bar = 2.5, type="fixed")
-        # np.save("safe_sample_pcd.npy",pc.cpu().numpy())
-        # ipdb.set_trace()
-        # self._refresh_pointcloud_visualizer(pc[0])
         if self.pc_normalize_flag:
             pc = self.pc_normalize(pc)
         joints = self.franka_num_dofs
@@ -845,89 +842,90 @@ class OpenSafe(BaseEnv):
 
         obs = {"pc": pc, "proprioception": proprioception_info, "dof_state": dof_state, "prev_action": prev_actions}
         return obs
+    #TODO: remove from other envs also.
+    # def collect_rgbd_data(self, flag=True):
+    #     """Collect RGBD observations including RGB and depth images from all cameras"""
+    #     # Get existing point cloud and proprioception data
+    #     pc = self.compute_point_cloud_state(depth_bar=2.5, type="fixed")
+        
+    #     # Apply normalization based on the safe environment's pattern
+    #     if self.pc_normalize_flag:
+    #         pc = self.pc_normalize(pc)
+        
+    #     joints = self.franka_num_dofs
+    #     robotqpose = (2 * (self.franka_dof_tensor[:, :joints, 0]-self.franka_dof_lower_limits_tensor[:joints])/
+    #                   (self.franka_dof_upper_limits_tensor[:joints] - self.franka_dof_lower_limits_tensor[:joints])) - 1
+    #     robotqvel = self.franka_dof_tensor[:, :joints, 1]
+    #     hand_pos = self.hand_rigid_body_tensor[:,:3]
+    #     hand_rot = self.hand_rigid_body_tensor[:,3:7]
+    #     proprioception_info = torch.cat([robotqpose, robotqvel, hand_pos, hand_rot], dim = -1)
+    #     prev_actions = self.actions
+    #     dof_state = torch.cat([self.one_dof_tensor[:,0].unsqueeze(-1), self.two_dof_tensor[:,0].unsqueeze(-1)], dim=-1)
 
-    def collect_rgbd_data(self, flag=True):
-        """Collect RGBD observations including RGB and depth images from all cameras"""
-        # Get existing point cloud and proprioception data
-        pc = self.compute_point_cloud_state(depth_bar=2.5, type="fixed")
+    #     # Collect RGB and depth images from all cameras
+    #     camera_props = gymapi.CameraProperties()
+    #     camera_props.width = self.cfg["env"]["cam"]["width"]
+    #     camera_props.height = self.cfg["env"]["cam"]["height"]
         
-        # Apply normalization based on the safe environment's pattern
-        if self.pc_normalize_flag:
-            pc = self.pc_normalize(pc)
+    #     self.gym.start_access_image_tensors(self.sim)
         
-        joints = self.franka_num_dofs
-        robotqpose = (2 * (self.franka_dof_tensor[:, :joints, 0]-self.franka_dof_lower_limits_tensor[:joints])/
-                      (self.franka_dof_upper_limits_tensor[:joints] - self.franka_dof_lower_limits_tensor[:joints])) - 1
-        robotqvel = self.franka_dof_tensor[:, :joints, 1]
-        hand_pos = self.hand_rigid_body_tensor[:,:3]
-        hand_rot = self.hand_rigid_body_tensor[:,3:7]
-        proprioception_info = torch.cat([robotqpose, robotqvel, hand_pos, hand_rot], dim = -1)
-        prev_actions = self.actions
-        dof_state = torch.cat([self.one_dof_tensor[:,0].unsqueeze(-1), self.two_dof_tensor[:,0].unsqueeze(-1)], dim=-1)
+    #     # Initialize lists to store images for each environment
+    #     rgb_images = []
+    #     depth_images = []
+        
+    #     for env_id in range(self.num_envs):
+    #         env_ptr = self.env_ptr_list[env_id]
+    #         env_rgb_images = []
+    #         env_depth_images = []
+            
+    #         # Collect from all fixed cameras for this environment
+    #         for cam_id in range(self.num_cam):
+    #             fixed_camera_handle = self.fixed_camera_handle_list[env_id][cam_id]
+                
+    #             # Get RGB image
+    #             rgb_array = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_COLOR)
+    #             rgb_image = rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]  # Remove alpha channel
+    #             env_rgb_images.append(rgb_image)
+                
+    #             # Get depth image  
+    #             depth_array = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_DEPTH)
+    #             depth_image = depth_array.reshape(camera_props.height, camera_props.width)
+    #             env_depth_images.append(depth_image)
+            
+    #         # Also collect from hand camera if available
+    #         if hasattr(self, 'hand_camera_handle_list') and len(self.hand_camera_handle_list) > env_id:
+    #             pass
+    #             # hand_camera_handle = self.hand_camera_handle_list[env_id]
+                
+    #             # # Hand camera RGB
+    #             # hand_rgb_array = self.gym.get_camera_image(self.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_COLOR)
+    #             # hand_rgb_image = hand_rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]
+    #             # env_rgb_images.append(hand_rgb_image)
+                
+    #             # # Hand camera depth
+    #             # hand_depth_array = self.gym.get_camera_image(self.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_DEPTH)
+    #             # hand_depth_image = hand_depth_array.reshape(camera_props.height, camera_props.width)
+    #             # env_depth_images.append(hand_depth_image)
+            
+    #         # Convert to numpy arrays and add to environment list
+    #         rgb_images.append(np.array(env_rgb_images))
+    #         depth_images.append(np.array(env_depth_images))
+        
+    #     self.gym.end_access_image_tensors(self.sim)
+        
+    #     # Convert to tensors
+    #     rgb_images_tensor = torch.tensor(np.array(rgb_images), device=self.device, dtype=torch.uint8)
+    #     depth_images_tensor = torch.tensor(np.array(depth_images), device=self.device, dtype=torch.float32)
 
-        # Collect RGB and depth images from all cameras
-        camera_props = gymapi.CameraProperties()
-        camera_props.width = self.cfg["env"]["cam"]["width"]
-        camera_props.height = self.cfg["env"]["cam"]["height"]
-        
-        self.gym.start_access_image_tensors(self.sim)
-        
-        # Initialize lists to store images for each environment
-        rgb_images = []
-        depth_images = []
-        
-        for env_id in range(self.num_envs):
-            env_ptr = self.env_ptr_list[env_id]
-            env_rgb_images = []
-            env_depth_images = []
-            
-            # Collect from all fixed cameras for this environment
-            for cam_id in range(self.num_cam):
-                fixed_camera_handle = self.fixed_camera_handle_list[env_id][cam_id]
-                
-                # Get RGB image
-                rgb_array = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_COLOR)
-                rgb_image = rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]  # Remove alpha channel
-                env_rgb_images.append(rgb_image)
-                
-                # Get depth image  
-                depth_array = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_DEPTH)
-                depth_image = depth_array.reshape(camera_props.height, camera_props.width)
-                env_depth_images.append(depth_image)
-            
-            # Also collect from hand camera if available
-            if hasattr(self, 'hand_camera_handle_list') and len(self.hand_camera_handle_list) > env_id:
-                hand_camera_handle = self.hand_camera_handle_list[env_id]
-                
-                # Hand camera RGB
-                hand_rgb_array = self.gym.get_camera_image(self.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_COLOR)
-                hand_rgb_image = hand_rgb_array.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]
-                env_rgb_images.append(hand_rgb_image)
-                
-                # Hand camera depth
-                hand_depth_array = self.gym.get_camera_image(self.sim, env_ptr, hand_camera_handle, gymapi.IMAGE_DEPTH)
-                hand_depth_image = hand_depth_array.reshape(camera_props.height, camera_props.width)
-                env_depth_images.append(hand_depth_image)
-            
-            # Convert to numpy arrays and add to environment list
-            rgb_images.append(np.array(env_rgb_images))
-            depth_images.append(np.array(env_depth_images))
-        
-        self.gym.end_access_image_tensors(self.sim)
-        
-        # Convert to tensors
-        rgb_images_tensor = torch.tensor(np.array(rgb_images), device=self.device, dtype=torch.uint8)
-        depth_images_tensor = torch.tensor(np.array(depth_images), device=self.device, dtype=torch.float32)
-
-        obs = {
-            "pc": pc, 
-            "proprioception": proprioception_info, 
-            "dof_state": dof_state, 
-            "prev_action": prev_actions,
-            "rgb_images": rgb_images_tensor,
-            "depth_images": depth_images_tensor
-        }
-        return obs
+    #     obs = {
+    #         "pc": pc, 
+    #         "proprioception": proprioception_info, 
+    #         "dof_state": dof_state, 
+    #         "prev_action": prev_actions,
+    #         "rgb_images": rgb_images_tensor,
+    #         "depth_images": depth_images_tensor
+    #     }
+    #     return obs
 
     def compute_point_cloud_state(self, depth_bar, type="fixed"):
         camera_props = gymapi.CameraProperties()
@@ -950,7 +948,7 @@ class OpenSafe(BaseEnv):
                     cam_proj = self.fixed_camera_proj_list[i][cam_id]
                     cam_array = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_DEPTH)
                     cam_color = self.gym.get_camera_image(self.sim, env_ptr, fixed_camera_handle, gymapi.IMAGE_COLOR)
-                    cam_color = cam_color.reshape(128, 128, 4)[:, :, :3]
+                    cam_color = cam_color.reshape(camera_props.height, camera_props.width, 4)[:, :, :3]
                     cam_tensor = torch.tensor(cam_array, device=self.device)
                     points = self.depth_image_to_point_cloud_GPU(cam_tensor, cam_vinv,
                                                                 cam_proj, camera_u2, camera_v2,
@@ -1005,12 +1003,8 @@ class OpenSafe(BaseEnv):
     def depth_image_to_point_cloud_GPU(self, camera_tensor, camera_view_matrix_inv, camera_proj_matrix, u, v, width,
                                        height,
                                        depth_bar):
-        # time1 = time.time()
         depth_buffer = camera_tensor.to(self.device)
-        # Get the camera view matrix and invert it to transform points from camera to world space
         vinv = camera_view_matrix_inv.to(self.device)
-        # Get the camera projection matrix and get the necessary scaling
-        # coefficients for deprojection
         proj = camera_proj_matrix.to(self.device)
         fu = 2 / proj[0, 0]
         fv = 2 / proj[1, 1]
