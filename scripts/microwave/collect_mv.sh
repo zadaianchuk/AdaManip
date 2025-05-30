@@ -1,1 +1,1 @@
-python run_rgbd.py --headless --task=OpenMicroWave --controller=GtController --manipulation=OpenMicroWaveManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/microwave/collect_mv.yaml
+python run_rgbd.py --headless --task=OpenMicroWave --controller=GtController --manipulation=OpenMicroWaveManipulation --sim_device=cuda:3 --seed=0 --pipeline=gpu --cfg_env=cfg/microwave/collect_mv.yaml

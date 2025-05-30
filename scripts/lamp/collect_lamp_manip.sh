@@ -1,1 +1,1 @@
-python run_rgbd.py --headless --task=OpenLamp --controller=GtController --manipulation=OpenLampManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/lamp/collect_lamp_manip.yaml
+python run_rgbd.py --headless --task=OpenLamp --controller=GtController --manipulation=OpenLampManipulation --sim_device=cuda:2 --seed=0 --pipeline=gpu --cfg_env=cfg/lamp/collect_lamp_manip.yaml

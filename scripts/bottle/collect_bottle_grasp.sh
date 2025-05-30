@@ -1,1 +1,1 @@
-python run_rgbd.py --headless --task=OpenBottle --controller=GtController --manipulation=OpenBottleManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/bottle/collect_bottle_grasp.yaml
+python run_rgbd.py --headless --task=OpenBottle --controller=GtController --manipulation=OpenBottleManipulation --sim_device=cuda:4 --seed=0 --pipeline=gpu --cfg_env=cfg/bottle/collect_bottle_grasp.yaml

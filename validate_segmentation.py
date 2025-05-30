@@ -22,7 +22,13 @@ def validate_segmentation_masks():
     print("=" * 50)
     
     # base_path = "adamanip_d3fields/OpenBottle"
-    base_path = "adamanip_d3fields/OpenCoffeeMachine"
+    # base_path = "adamanip_d3fields/OpenCoffeeMachine"
+    base_path = "adamanip_d3fields/OpenPressureCooker"
+    # base_path = "adamanip_d3fields/OpenSafe"
+    # base_path = "adamanip_d3fields/OpenWindow"
+    
+    
+    
     
     if not os.path.exists(base_path):
         print(f"❌ Dataset path not found: {base_path}")
@@ -38,7 +44,7 @@ def validate_segmentation_masks():
     }
     
     # Process each environment
-    env_dirs = [d for d in os.listdir(base_path) if d.startswith('grasp_env_')]
+    env_dirs = [d for d in os.listdir(base_path) if d.startswith('grasp_env_') or d.startswith('manip_env_')]
     validation_results['total_environments'] = len(env_dirs)
     
     print(f"📂 Found {len(env_dirs)} environments to validate")
@@ -164,34 +170,27 @@ def validate_segmentation_masks():
         meaning = id_meanings.get(seg_id, f"Object Type {seg_id-2}" if seg_id >= 2 else "Unknown")
         print(f"   ID {seg_id}: {meaning}")
     
-    # Check for expected segmentation IDs
-    expected_ids = {0, 1, 2}  # Background, robot, bottle
-    found_expected = expected_ids.intersection(set(all_unique_ids))
-    missing_expected = expected_ids - set(all_unique_ids)
-    
-    print(f"\n🎯 EXPECTED vs FOUND:")
-    print(f"   Expected IDs: {sorted(list(expected_ids))}")
-    print(f"   Found Expected: {sorted(list(found_expected))}")
-    if missing_expected:
-        print(f"   Missing Expected: {sorted(list(missing_expected))}")
-    
+    found = all_unique_ids
+
     # Determine overall validation result
     overall_valid = (
         validation_results['valid_environments'] > 0 and
         validation_results['valid_masks'] > 0 and
-        len(found_expected) >= 2  # At least background + one object type
+        len(found) >= 2  # At least background + one object type
     )
     
     if overall_valid:
-        print(f"\n🎉 VALIDATION PASSED!")
-        print(f"✅ Segmentation masks contain meaningful object IDs")
-        print(f"✅ Multiple object types detected: {sorted(list(found_expected))}")
-        print(f"✅ {validation_results['valid_masks']} masks successfully contain non-background objects")
+        if validation_results['valid_masks'] == validation_results['total_masks']:
+            print(f"\n🎉 VALIDATION PASSED!")
+        else:
+            print(f"\n❌ VALIDATION ONLY PARTIALLY PASSED!")
+        print(f"Segmentation masks contain meaningful object IDs")
+        print(f"{validation_results['valid_masks']}/{validation_results['total_masks']} masks successfully contain non-background objects")
     else:
         print(f"\n❌ VALIDATION FAILED!")
         if validation_results['valid_masks'] == 0:
             print(f"❌ No masks contain non-background objects")
-        if len(found_expected) < 2:
+        if len(found) < 2:
             print(f"❌ Insufficient object types detected")
     
 
@@ -241,16 +240,7 @@ def main():
     quick_mask_test()
     
     # Run comprehensive validation
-    validation_passed = validate_segmentation_masks()
-    
-    if validation_passed:
-        print(f"\n🎉 SUCCESS: Segmentation implementation working correctly!")
-        print(f"📝 The RGBD collection pipeline now saves meaningful segmentation masks")
-        print(f"🔧 Fix applied: Isaac Gym actors assigned proper segmentation IDs")
-        print(f"📁 Masks saved in d3fields-compatible format: camera_X/masks/*.png")
-    else:
-        print(f"\n⚠️  Issues detected in segmentation masks")
-        print(f"🔍 Check the validation report for details")
+    validate_segmentation_masks()   
 
 if __name__ == "__main__":
     main() 

@@ -1,1 +1,1 @@
-python run_rgbd.py --headless --task=OpenCoffeeMachine --controller=GtController --manipulation=OpenCoffeeMachineManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/cm/collect_cm_grasp.yaml
+python run_rgbd.py --headless --task=OpenCoffeeMachine --controller=GtController --manipulation=OpenCoffeeMachineManipulation --sim_device=cuda:5 --seed=0 --pipeline=gpu --cfg_env=cfg/cm/collect_cm_grasp.yaml

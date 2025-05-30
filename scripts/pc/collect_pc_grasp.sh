@@ -1,1 +1,1 @@
-python run_rgbd.py --headless --task=OpenPressureCooker --controller=GtController --manipulation=OpenPressureCookerManipulation --sim_device=cuda:0 --seed=0 --pipeline=gpu --cfg_env=cfg/pressure_cooker/collect_pc_grasp.yaml
+python run_rgbd.py --headless --task=OpenPressureCooker --controller=GtController --manipulation=OpenPressureCookerManipulation --sim_device=cuda:7 --seed=0 --pipeline=gpu --cfg_env=cfg/pressure_cooker/collect_pc_grasp.yaml
