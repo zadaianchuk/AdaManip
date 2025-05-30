@@ -361,7 +361,7 @@ class OpenDoor(BaseEnv):
             initial_franka_pose,
             "franka",
             env_id,
-            0,
+            1,  # Segmentation ID = 1 for Franka robot
             0)
 
         # rigid props
@@ -494,7 +494,7 @@ class OpenDoor(BaseEnv):
             "bottle-{}-{}".format(door_type, subenv_id),
             env_id,
             1,
-            0)
+            2 + door_type) # Segmentation ID = 2 + object type
         
         self.actor_list.append(obj_actor)
 

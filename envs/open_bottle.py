@@ -395,7 +395,7 @@ class OpenBottle(BaseEnv):
             "franka",
             env_id,
             0,
-            0)
+            1)  # Segmentation ID = 1 for Franka robot
 
         # rigid props
         franka_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, franka_actor)
@@ -516,7 +516,7 @@ class OpenBottle(BaseEnv):
             "bottle-{}-{}".format(door_type, subenv_id),
             env_id,
             1,
-            0)
+            2 + door_type)  # Segmentation ID = 2 + object_type for bottles
                 
         self.actor_list.append(obj_actor)
 
