@@ -4,7 +4,7 @@ task:
   num_episode: 1
   num_eval_episode: 10
   grasp: False
-
+  max_steps: 50
 
 env:
   env_name: "open lamp"
