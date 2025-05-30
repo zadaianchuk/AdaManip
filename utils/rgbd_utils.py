@@ -12,13 +12,15 @@ Key features:
 - Automatic fallback for environments without RGBD capability
 """
 
-import torch
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional, Any
+# Import Isaac Gym BEFORE PyTorch (Isaac Gym requirement)
 from isaacgym import gymapi
 from isaacgym import gymtorch
+# Now safe to import PyTorch
+import torch
 
 def extract_camera_intrinsics_from_projection(proj_matrix: torch.Tensor, width: int, height: int) -> np.ndarray:
     """
@@ -78,14 +80,14 @@ def convert_view_matrix_to_extrinsics(view_matrix: torch.Tensor, is_already_inve
 
 def collect_camera_images(env, debug=False):
     """
-    Enhanced camera image collection with proper camera parameter extraction
+    Enhanced camera image collection with proper camera parameter extraction and segmentation masks
     
     Args:
         env: Isaac Gym environment
         debug: Whether to print debug information
         
     Returns:
-        tuple: (rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info)
+        tuple: (rgb_images, depth_images, segmentation_masks, camera_intrinsics, camera_extrinsics, camera_info)
     """
     try:
         # Ensure camera sensors are rendered
@@ -95,6 +97,7 @@ def collect_camera_images(env, debug=False):
         
         rgb_images_list = []
         depth_images_list = []
+        segmentation_masks_list = []
         camera_intrinsics_list = []
         camera_extrinsics_list = []
         camera_info_list = []
@@ -110,6 +113,7 @@ def collect_camera_images(env, debug=False):
         for env_id in range(env.num_envs):
             env_rgb_images = []
             env_depth_images = []
+            env_segmentation_masks = []
             env_intrinsics = []
             env_extrinsics = []
             env_info = []
@@ -119,64 +123,68 @@ def collect_camera_images(env, debug=False):
                 fixed_cameras = env.fixed_camera_handle_list[env_id]
                 
                 for cam_idx, camera_handle in enumerate(fixed_cameras):
-                    try:
-                        # Get RGB image
-                        rgb_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_COLOR)
-                        rgb_image = gymtorch.wrap_tensor(rgb_tensor)
-                        rgb_image = rgb_image.cpu().numpy()
-                        
-                        # Remove alpha channel
-                        if len(rgb_image.shape) == 3 and rgb_image.shape[2] == 4:
-                            rgb_image = rgb_image[:, :, :3]  # Remove alpha channel (RGBA -> RGB)
-                        
-                        # Get depth image
-                        depth_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_DEPTH)
-                        depth_image = gymtorch.wrap_tensor(depth_tensor)
-                        depth_image = depth_image.cpu().numpy()
-                        
-                        # Get camera parameters
-                        if hasattr(env, 'fixed_camera_proj_list') and len(env.fixed_camera_proj_list) > env_id:
-                            if len(env.fixed_camera_proj_list[env_id]) > cam_idx:
-                                proj_matrix = env.fixed_camera_proj_list[env_id][cam_idx]
-                                intrinsics = extract_camera_intrinsics_from_projection(proj_matrix, cam_width, cam_height)
-                            else:
-                                raise ValueError(f"No projection matrix found for camera {cam_idx} in environment {env_id}")
+                    # Get RGB image
+                    rgb_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_COLOR)
+                    rgb_image = gymtorch.wrap_tensor(rgb_tensor)
+                    rgb_image = rgb_image.cpu().numpy()
+                    
+                    # Remove alpha channel
+                    if len(rgb_image.shape) == 3 and rgb_image.shape[2] == 4:
+                        rgb_image = rgb_image[:, :, :3]  # Remove alpha channel (RGBA -> RGB)
+                    
+                    # Get depth image
+                    depth_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_DEPTH)
+                    depth_image = gymtorch.wrap_tensor(depth_tensor)
+                    depth_image = depth_image.cpu().numpy()
+                    
+                    # Get segmentation mask
+
+                    seg_tensor = env.gym.get_camera_image_gpu_tensor(env.sim, env.env_ptr_list[env_id], camera_handle, gymapi.IMAGE_SEGMENTATION)
+                    seg_mask = gymtorch.wrap_tensor(seg_tensor)
+                    seg_mask = seg_mask.cpu().numpy().astype(np.uint32)
+                    assert np.unique(seg_mask).shape[0] > 1, "Segmentation mask should have more than one unique value"
+
+                    
+                    # Get camera parameters
+                    if hasattr(env, 'fixed_camera_proj_list') and len(env.fixed_camera_proj_list) > env_id:
+                        if len(env.fixed_camera_proj_list[env_id]) > cam_idx:
+                            proj_matrix = env.fixed_camera_proj_list[env_id][cam_idx]
+                            intrinsics = extract_camera_intrinsics_from_projection(proj_matrix, cam_width, cam_height)
                         else:
-                            raise ValueError(f"No projection matrix list found for environment {env_id}")
-                        
-                        if hasattr(env, 'fixed_camera_vinv_list') and len(env.fixed_camera_vinv_list) > env_id:
-                            if len(env.fixed_camera_vinv_list[env_id]) > cam_idx:
-                                view_matrix = env.fixed_camera_vinv_list[env_id][cam_idx]
-                                extrinsics = convert_view_matrix_to_extrinsics(view_matrix, is_already_inverted=True)
-                                
-                                if debug:
-                                    # Verify the fix: extrinsics should be world-to-camera (det should be ~1)
-                                    det = np.linalg.det(extrinsics[:3, :3])
-                                    print(f"      Extrinsics rotation determinant: {det:.3f} (should be ~1.0)")
-                            else:
-                                extrinsics = np.eye(4, dtype=np.float32)
+                            raise ValueError(f"No projection matrix found for camera {cam_idx} in environment {env_id}")
+                    else:
+                        raise ValueError(f"No projection matrix list found for environment {env_id}")
+                    
+                    if hasattr(env, 'fixed_camera_vinv_list') and len(env.fixed_camera_vinv_list) > env_id:
+                        if len(env.fixed_camera_vinv_list[env_id]) > cam_idx:
+                            view_matrix = env.fixed_camera_vinv_list[env_id][cam_idx]
+                            extrinsics = convert_view_matrix_to_extrinsics(view_matrix, is_already_inverted=True)
+                            
+                            if debug:
+                                # Verify the fix: extrinsics should be world-to-camera (det should be ~1)
+                                det = np.linalg.det(extrinsics[:3, :3])
+                                print(f"      Extrinsics rotation determinant: {det:.3f} (should be ~1.0)")
                         else:
-                            extrinsics = np.eye(4, dtype=np.float32)
-                        
-                        env_rgb_images.append(rgb_image)
-                        env_depth_images.append(depth_image)
-                        env_intrinsics.append(intrinsics)
-                        env_extrinsics.append(extrinsics)
-                        env_info.append({"type": "fixed", "id": cam_idx, "env_id": env_id})
-                        
-                        if debug:
-                            print(f"   Fixed camera {cam_idx}: RGB {rgb_image.shape}, Depth {depth_image.shape}")
-                            print(f"      Intrinsics: fx={intrinsics[0]:.1f}, fy={intrinsics[1]:.1f}, cx={intrinsics[2]:.1f}, cy={intrinsics[3]:.1f}")
-                        
-                    except Exception as e:
-                        if debug:
-                            print(f"⚠️ Error collecting from fixed camera {cam_idx}: {e}")
-                        continue
+                            raise ValueError(f"No view matrix found for camera {cam_idx} in environment {env_id}")
+                    else:
+                        raise ValueError(f"No projection matrix list found for environment {env_id}")
+                    
+                    env_rgb_images.append(rgb_image)
+                    env_depth_images.append(depth_image)
+                    env_segmentation_masks.append(seg_mask)
+                    env_intrinsics.append(intrinsics)
+                    env_extrinsics.append(extrinsics)
+                    env_info.append({"type": "fixed", "id": cam_idx, "env_id": env_id})
+                    
+                    if debug:
+                        print(f"   Fixed camera {cam_idx}: RGB {rgb_image.shape}, Depth {depth_image.shape}, Seg {seg_mask.shape}")
+                        print(f"   Intrinsics: fx={intrinsics[0]:.1f}, fy={intrinsics[1]:.1f}, cx={intrinsics[2]:.1f}, cy={intrinsics[3]:.1f}")
             
             # Convert to numpy arrays
             if env_rgb_images:
                 rgb_images_list.append(np.array(env_rgb_images))
                 depth_images_list.append(np.array(env_depth_images))
+                segmentation_masks_list.append(np.array(env_segmentation_masks))
                 camera_intrinsics_list.append(np.array(env_intrinsics))
                 camera_extrinsics_list.append(np.array(env_extrinsics))
                 camera_info_list.append(env_info)
@@ -186,6 +194,11 @@ def collect_camera_images(env, debug=False):
         # Convert to tensors
         rgb_images = torch.tensor(np.array(rgb_images_list), dtype=torch.uint8)
         depth_images = torch.tensor(np.array(depth_images_list), dtype=torch.float32)
+        # Convert uint32 numpy arrays to int32 for PyTorch compatibility
+        segmentation_arrays = np.array(segmentation_masks_list)
+        if segmentation_arrays.dtype == np.uint32:
+            segmentation_arrays = segmentation_arrays.astype(np.int32)
+        segmentation_masks = torch.tensor(segmentation_arrays, dtype=torch.int32)
         camera_intrinsics = torch.tensor(np.array(camera_intrinsics_list), dtype=torch.float32)
         camera_extrinsics = torch.tensor(np.array(camera_extrinsics_list), dtype=torch.float32)
         
@@ -196,30 +209,32 @@ def collect_camera_images(env, debug=False):
             print(f"Collected camera data:")
             print(f"   RGB: {rgb_images.shape}")
             print(f"   Depth: {depth_images.shape}")
+            print(f"   Segmentation: {segmentation_masks.shape}")
             print(f"   Intrinsics: {camera_intrinsics.shape}")
             print(f"   Extrinsics: {camera_extrinsics.shape}")
         
-        return rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info_list
+        return rgb_images, depth_images, segmentation_masks, camera_intrinsics, camera_extrinsics, camera_info_list
         
     except Exception as e:
         raise ValueError(f"Error in collect_camera_images: {e}")
 
 def add_rgbd_collection_to_env(env_class):
     """
-    Enhanced function to add RGBD collection capability with proper camera parameters
+    Enhanced function to add RGBD collection capability with proper camera parameters and segmentation masks
     """
     def collect_rgbd_data(self, flag=True, debug=False):
-        """Collect RGBD data with enhanced camera parameter extraction"""
+        """Collect RGBD data with enhanced camera parameter extraction and segmentation masks"""
         try:
             # Get base observation
             base_obs = self.collect_diff_data() if hasattr(self, 'collect_diff_data') else {}
             
-            # Collect camera images with parameters
-            rgb_images, depth_images, camera_intrinsics, camera_extrinsics, camera_info = collect_camera_images(self, debug=debug)
+            # Collect camera images with parameters and segmentation masks
+            rgb_images, depth_images, segmentation_masks, camera_intrinsics, camera_extrinsics, camera_info = collect_camera_images(self, debug=debug)
             
             # Add RGBD data to observation
             base_obs["rgb_images"] = rgb_images
             base_obs["depth_images"] = depth_images
+            base_obs["segmentation_masks"] = segmentation_masks
             base_obs["camera_intrinsics"] = camera_intrinsics
             base_obs["camera_extrinsics"] = camera_extrinsics
             base_obs["camera_info"] = camera_info
@@ -228,6 +243,7 @@ def add_rgbd_collection_to_env(env_class):
                 print(f"   RGBD observation keys: {list(base_obs.keys())}")
                 print(f"   RGB shape: {rgb_images.shape}")
                 print(f"   Depth shape: {depth_images.shape}")
+                print(f"   Segmentation shape: {segmentation_masks.shape}")
                 print(f"   Camera intrinsics shape: {camera_intrinsics.shape}")
                 print(f"   Camera extrinsics shape: {camera_extrinsics.shape}")
             
@@ -239,4 +255,4 @@ def add_rgbd_collection_to_env(env_class):
 
     # Add the method to the class
     env_class.collect_rgbd_data = collect_rgbd_data
-    print(f"Enhanced RGBD collection capability added to {env_class.__name__}")
+    print(f"Enhanced RGBD collection capability with segmentation masks added to {env_class.__name__}")

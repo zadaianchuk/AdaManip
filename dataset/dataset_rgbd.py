@@ -20,6 +20,7 @@ class RGBDEpisodeBuffer:
         self.action = []
         self.rgb_images = []
         self.depth_images = []
+        self.segmentation_masks = []
         # Camera parameter storage
         self.camera_intrinsics = []  # Camera intrinsic matrices [fx, fy, cx, cy], fx and fy are Focal Lengths in pixels
         self.camera_extrinsics = []  # Camera extrinsic matrices (world-to-camera transform), inv of camera_view_matrix
@@ -33,13 +34,14 @@ class RGBDEpisodeBuffer:
         # Add empty RGB/depth placeholders for compatibility
         self.rgb_images.append(np.zeros((1, 1, 3), dtype=np.uint8))
         self.depth_images.append(np.zeros((1, 1), dtype=np.float32))
+        self.segmentation_masks.append(np.zeros((1, 1), dtype=np.uint32))
         # Add empty camera parameter placeholders
         self.camera_intrinsics.append(np.zeros((1, 4), dtype=np.float32))  # [fx, fy, cx, cy]
         self.camera_extrinsics.append(np.eye(4, dtype=np.float32).reshape(1, 4, 4))
         self.camera_info.append([{"type": "dummy", "id": 0}])
 
-    def add_rgbd(self, pc, env_state, action, rgb_images, depth_images, camera_intrinsics=None, camera_extrinsics=None, camera_info=None):
-        """Add RGBD observation with images and camera parameters"""
+    def add_rgbd(self, pc, env_state, action, rgb_images, depth_images, segmentation_masks=None, camera_intrinsics=None, camera_extrinsics=None, camera_info=None):
+        """Add RGBD observation with images, segmentation masks and camera parameters"""
         self.pcs.append(pc.cpu().numpy())
         self.env_state.append(env_state.cpu().numpy())
         self.action.append(action.cpu().numpy())
@@ -57,6 +59,16 @@ class RGBDEpisodeBuffer:
         if isinstance(depth_images, list):
             depth_images = np.array(depth_images)
         self.depth_images.append(depth_images)
+        
+        # Handle segmentation masks
+        if segmentation_masks is not None:
+            if isinstance(segmentation_masks, torch.Tensor):
+                segmentation_masks = segmentation_masks.cpu().numpy()
+            if isinstance(segmentation_masks, list):
+                segmentation_masks = np.array(segmentation_masks)
+            self.segmentation_masks.append(segmentation_masks)
+        else:
+            raise ValueError("segmentation_masks is not provided")
         
         # Handle camera parameters
         if camera_intrinsics is not None:
@@ -86,7 +98,7 @@ class RGBDEpisodeBuffer:
             self.camera_info.append(default_info)
 
 class RGBDExperience:
-    """Experience replay buffer that handles RGBD data with camera parameters"""
+    """Experience replay buffer that handles RGBD data with camera parameters and segmentation masks"""
     def __init__(self, sample_pcs_num=1000):
         self.sample_pcs_num = sample_pcs_num
         self.data = {
@@ -95,6 +107,7 @@ class RGBDExperience:
             "action": [],
             "rgb_images": [],
             "depth_images": [],
+            "segmentation_masks": [],
             "camera_intrinsics": [],
             "camera_extrinsics": [],
             "camera_info": []
@@ -112,6 +125,7 @@ class RGBDExperience:
             self.data["action"] = np.array(episode.action)
             self.data["rgb_images"] = np.array(episode.rgb_images)
             self.data["depth_images"] = np.array(episode.depth_images)
+            self.data["segmentation_masks"] = np.array(episode.segmentation_masks)
             self.data["camera_intrinsics"] = np.array(episode.camera_intrinsics)
             self.data["camera_extrinsics"] = np.array(episode.camera_extrinsics)
             # Camera info is stored as a list of lists (can't easily convert to numpy array)
@@ -122,6 +136,7 @@ class RGBDExperience:
             self.data["action"] = np.concatenate([self.data["action"], np.array(episode.action)])
             self.data["rgb_images"] = np.concatenate([self.data["rgb_images"], np.array(episode.rgb_images)])
             self.data["depth_images"] = np.concatenate([self.data["depth_images"], np.array(episode.depth_images)])
+            self.data["segmentation_masks"] = np.concatenate([self.data["segmentation_masks"], np.array(episode.segmentation_masks)])
             self.data["camera_intrinsics"] = np.concatenate([self.data["camera_intrinsics"], np.array(episode.camera_intrinsics)])
             self.data["camera_extrinsics"] = np.concatenate([self.data["camera_extrinsics"], np.array(episode.camera_extrinsics)])
             self.data["camera_info"].extend(episode.camera_info)
@@ -130,13 +145,13 @@ class RGBDExperience:
         self.meta["episode_ends"].append(new_end)
 
     def save_png_npy(self, path, fixed_cameras_only=True):
-        """Save RGBD data using d3fields structure: separate camera directories with color/depth subdirs
+        """Save RGBD data using d3fields structure: separate camera directories with color/depth/masks subdirs
         
         Args:
             path: Base directory path to save the dataset
             fixed_cameras_only: If True, only save data from fixed cameras (exclude hand cameras)
         """
-        print(f"Saving RGBD dataset in d3fields format to {path}")
+        print(f"Saving RGBD dataset with segmentation masks in d3fields format to {path}")
         if fixed_cameras_only:
             print("📌 Using fixed cameras only (excluding hand cameras with time-varying extrinsics)")
         
@@ -147,6 +162,7 @@ class RGBDExperience:
         # Get data shapes
         rgb_data = self.data["rgb_images"]
         depth_data = self.data["depth_images"]
+        segmentation_data = self.data["segmentation_masks"]
         camera_info_data = self.data["camera_info"]
         
         if len(rgb_data) == 0:
@@ -182,26 +198,31 @@ class RGBDExperience:
             cam_dir = os.path.join(base_dir, f'camera_{i}')  # Use sequential numbering for output
             color_dir = os.path.join(cam_dir, 'color')
             depth_dir = os.path.join(cam_dir, 'depth')
+            masks_dir = os.path.join(cam_dir, 'masks')
             os.makedirs(color_dir, exist_ok=True)
             os.makedirs(depth_dir, exist_ok=True)
+            os.makedirs(masks_dir, exist_ok=True)
         
         # Save images for each step and fixed camera
         for step_idx in range(num_steps):
             rgb_step = rgb_data[step_idx]  # Shape: [num_cameras, height, width, 3]
             depth_step = depth_data[step_idx]  # Shape: [num_cameras, height, width]
+            seg_step = segmentation_data[step_idx]  # Shape: [num_cameras, height, width]
             
             if rgb_step.size == 0:
                 continue
             
             for i, cam_idx in enumerate(fixed_camera_indices):
                 try:
-                    # Get RGB and depth for this fixed camera
+                    # Get RGB, depth and segmentation for this fixed camera
                     if len(rgb_step.shape) >= 4:  # [num_cameras, height, width, 3]
                         rgb_img = rgb_step[cam_idx]
                         depth_img = depth_step[cam_idx]
+                        seg_img = seg_step[cam_idx]
                     else:  # Single camera case
                         rgb_img = rgb_step
                         depth_img = depth_step
+                        seg_img = seg_step
                     
                     # Save RGB image as PNG in color directory
                     if rgb_img.size > 1:  # Not dummy data
@@ -227,6 +248,24 @@ class RGBDExperience:
                     # Scale to 16-bit range while preserving original values
                     depth_img_16 = (np.clip(-depth_img, 0, 2.5) * 1000).astype(np.uint16)  # Convert meters to millimeters
                     Image.fromarray(depth_img_16).save(depth_path)
+                    
+                    # Save segmentation mask as PNG in masks directory
+                    mask_filename = f"{step_idx}.png"
+                    mask_path = os.path.join(base_dir, f"camera_{i}", "masks", mask_filename)
+                    
+                    # Convert segmentation mask to appropriate format
+                    # Isaac Gym segmentation IDs are 32-bit integers, but we need to handle large IDs properly
+                    if seg_img.dtype != np.uint32:
+                        seg_img = seg_img.astype(np.uint32)
+                    
+                    # For PNG saving, we need to decide how to handle the segmentation IDs
+                    # Option 1: Save as grayscale PNG (8-bit) - map unique IDs to 0-255 range
+                    # Option 2: Save as RGB PNG where ID is encoded in RGB channels
+                    # Option 3: Save as 16-bit grayscale PNG (supports up to 65535 unique IDs)
+                    
+                    # We'll use Option 3: 16-bit grayscale PNG for better ID preservation
+                    seg_img_16 = np.clip(seg_img, 0, 65535).astype(np.uint16)
+                    Image.fromarray(seg_img_16, mode='I;16').save(mask_path)
                 
                 except Exception as e:
                     print(f"Error saving images for step {step_idx}, camera {cam_idx}: {e}")
@@ -294,7 +333,7 @@ class RGBDExperience:
         
         # Save dataset info file (similar to d3fields format)
         dataset_info = {
-            "format": "d3fields_compatible",
+            "format": "d3fields_compatible_with_segmentation",
             "num_frames": num_steps,
             "num_cameras": num_cameras,
             "fixed_cameras_only": fixed_cameras_only,
@@ -302,24 +341,26 @@ class RGBDExperience:
             "rgb_shape": f"({num_steps}, {num_cameras}, H, W, 3)",
             "depth_format": "PNG RGB",
             "color_format": "PNG RGB",
+            "segmentation_format": "PNG 16-bit grayscale (segmentation IDs)",
             "camera_params_format": "numpy [fx, fy, cx, cy]",
             "camera_extrinsics_format": "numpy 4x4 world-to-camera (static)",
             "total_episodes": len(self.meta["episode_ends"]),
-            "storage_structure": "camera_X/color/*.png, camera_X/depth/*.png",
-            "note": "Hand cameras excluded due to time-varying extrinsics"
+            "storage_structure": "camera_X/color/*.png, camera_X/depth/*.png, camera_X/masks/*.png",
+            "note": "Hand cameras excluded due to time-varying extrinsics. Segmentation masks saved as 16-bit PNG."
         }
         
         with open(os.path.join(base_dir, 'dataset_info.txt'), 'w') as f:
-            f.write("D3Fields Compatible Dataset Info\n")
-            f.write("=" * 40 + "\n\n")
+            f.write("D3Fields Compatible Dataset Info (with Segmentation)\n")
+            f.write("=" * 50 + "\n\n")
             for key, value in dataset_info.items():
                 f.write(f"{key}: {value}\n")
         
-        print(f"Saved RGBD dataset in d3fields format:")
+        print(f"Saved RGBD dataset with segmentation masks in d3fields format:")
         print(f"   Base directory: {base_dir}")
         print(f"   Frames: {num_steps}")
         print(f"   Fixed cameras: {num_cameras}")
         print(f"   RGB: camera_X/color/*.png")
         print(f"   Depth: camera_X/depth/*.png")
+        print(f"   Segmentation: camera_X/masks/*.png (16-bit PNG)")
         print(f"   Camera params: camera_X/camera_params.npy")
         print(f"   Static extrinsics only (hand cameras excluded)")

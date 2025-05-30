@@ -37,6 +37,12 @@ def run_rgbd():
             rgb_shape = test_obs['rgb_images'].shape
             depth_shape = test_obs['depth_images'].shape
             print(f"RGBD collection working - RGB: {rgb_shape}, Depth: {depth_shape}")
+            # Check for segmentation masks
+            if 'segmentation_masks' in test_obs:
+                seg_shape = test_obs['segmentation_masks'].shape
+                print(f"Segmentation masks available - Shape: {seg_shape}")
+            else:
+                print("No segmentation masks found in observation")
         else:
             print("RGBD collection returned data but missing image keys")
     except Exception as e:
@@ -100,10 +106,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
         # First phase - approach
         for i in range(3):
             # Collect RGBD observations
-            try:
-                rgbd_obs = env.collect_rgbd_data()
-            except Exception as e:
-                raise ValueError(f"RGBD collection failed: {e}")
+            rgbd_obs = env.collect_rgbd_data()
             
             # Step environment
             for j in range(10):
@@ -121,6 +124,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
                         camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
                         camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
                         camera_info = rgbd_obs.get('camera_info', None)
+                        segmentation_masks = rgbd_obs.get('segmentation_masks', None)
                         
                         eps_buffer[env_id].add_rgbd(
                             rgbd_obs['pc'][env_id], 
@@ -128,6 +132,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
                             gt_action[env_id],
                             rgbd_obs['rgb_images'][env_id],
                             rgbd_obs['depth_images'][env_id],
+                            segmentation_masks=segmentation_masks[env_id] if segmentation_masks is not None else None,
                             camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
                             camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
                             camera_info=camera_info[env_id] if camera_info is not None else None
@@ -166,6 +171,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
                         camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
                         camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
                         camera_info = rgbd_obs.get('camera_info', None)
+                        segmentation_masks = rgbd_obs.get('segmentation_masks', None)
                         
                         eps_buffer[env_id].add_rgbd(
                             rgbd_obs['pc'][env_id], 
@@ -173,6 +179,7 @@ def collect_grasp_data_rgbd(manipulation, env, cfg):
                             gt_action[env_id],
                             rgbd_obs['rgb_images'][env_id],
                             rgbd_obs['depth_images'][env_id],
+                            segmentation_masks=segmentation_masks[env_id] if segmentation_masks is not None else None,
                             camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
                             camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
                             camera_info=camera_info[env_id] if camera_info is not None else None
@@ -296,6 +303,7 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
                             camera_intrinsics = rgbd_obs.get('camera_intrinsics', None)
                             camera_extrinsics = rgbd_obs.get('camera_extrinsics', None)
                             camera_info = rgbd_obs.get('camera_info', None)
+                            segmentation_masks = rgbd_obs.get('segmentation_masks', None)
                             
                             eps_buffer[env_id].add_rgbd(
                                 rgbd_obs['pc'][env_id], 
@@ -303,6 +311,7 @@ def collect_manip_data_rgbd(manipulation, env, cfg):
                                 gt_action[env_id],
                                 rgbd_obs['rgb_images'][env_id],
                                 rgbd_obs['depth_images'][env_id],
+                                segmentation_masks=segmentation_masks[env_id] if segmentation_masks is not None else None,
                                 camera_intrinsics=camera_intrinsics[env_id] if camera_intrinsics is not None else None,
                                 camera_extrinsics=camera_extrinsics[env_id] if camera_extrinsics is not None else None,
                                 camera_info=camera_info[env_id] if camera_info is not None else None
