@@ -150,7 +150,7 @@ def get_args():
             "help": "Force display off at all times"},
         {"name": "--task", "type": str, "default": "OpenBottle",
             "help": "Can be OpenBottle, xxx"},
-        {"name": "--controller", "type": str, "default": "GTController"},
+        {"name": "--controller", "type": str, "default": "GtController"},
         {"name": "--manipulation", "type": str, "default": "OpenBottleManipulation"},
         {"name": "--logdir", "type": str, "default": "./logs/"},
         {"name": "--cfg_env", "type": str, "default": "Base"},
