@@ -155,7 +155,9 @@ def get_args():
         {"name": "--logdir", "type": str, "default": "./logs/"},
         {"name": "--cfg_env", "type": str, "default": "Base"},
         {"name": "--seed", "type": int, "default": 42, "help": "Random seed"},
-        {"name": "--start_id", "type": int, "default": 0, "help": "Start Index of the loaded assets"}]
+        {"name": "--start_id", "type": int, "default": 0, "help": "Start Index of the loaded assets"},
+        {"name": "--rgbd_data_dir", "type": str, "default": "./adamanip_d3fields_manipulation",
+            "help": "Base directory for saving RGBD data"}]
 
     # parse arguments
     args = gymutil.parse_arguments(

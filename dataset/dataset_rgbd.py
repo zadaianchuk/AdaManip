@@ -172,20 +172,40 @@ class RGBDExperience:
         # Determine number of cameras and filter for fixed cameras only
         num_steps = len(rgb_data)
         total_cameras = rgb_data[0].shape[0] if len(rgb_data[0].shape) > 1 else 1
+        print(f"🔍 Debug: RGB data shape: {rgb_data[0].shape}, detected {total_cameras} cameras")
         
         # Filter cameras based on camera_info to identify fixed vs hand cameras
         fixed_camera_indices = []
         if fixed_cameras_only and len(camera_info_data) > 0:
-            # Check first step's camera info to identify fixed cameras
-            first_step_info = camera_info_data[0]
-            for cam_idx, cam_info in enumerate(first_step_info):
-                if cam_info.get('type', 'unknown') != 'hand':
-                    fixed_camera_indices.append(cam_idx)
-            
-            if not fixed_camera_indices:
-                # Fallback: assume all cameras are fixed if no hand cameras identified
+            try:
+                # Check first step's camera info to identify fixed cameras
+                first_step_info = camera_info_data[0]
+                print(f"🔍 Debug: Camera info length: {len(first_step_info)}, RGB cameras: {total_cameras}")
+                
+                # Only process cameras that actually exist in the RGB data
+                max_cam_idx = min(len(first_step_info), total_cameras)
+                for cam_idx in range(max_cam_idx):
+                    cam_info = first_step_info[cam_idx]
+                    # Handle case where cam_info might be a list or dict
+                    if isinstance(cam_info, dict):
+                        if cam_info.get('type', 'unknown') != 'hand':
+                            fixed_camera_indices.append(cam_idx)
+                    elif isinstance(cam_info, list):
+                        # If cam_info is a list, assume it's not a hand camera
+                        fixed_camera_indices.append(cam_idx)
+                    else:
+                        # Unknown format, assume it's not a hand camera
+                        fixed_camera_indices.append(cam_idx)
+                
+                if not fixed_camera_indices:
+                    # Fallback: assume all cameras are fixed if no hand cameras identified
+                    fixed_camera_indices = list(range(total_cameras))
+                    print("⚠️ No hand cameras identified, using all cameras")
+                    
+                print(f"🔍 Debug: Fixed camera indices: {fixed_camera_indices}")
+            except Exception as e:
+                print(f"⚠️ Error processing camera info: {e}, using all cameras")
                 fixed_camera_indices = list(range(total_cameras))
-                print("⚠️ No hand cameras identified, using all cameras")
         else:
             # Use all cameras if not filtering
             fixed_camera_indices = list(range(total_cameras))

@@ -225,8 +225,13 @@ def add_rgbd_collection_to_env(env_class):
     def collect_rgbd_data(self, flag=True, debug=False):
         """Collect RGBD data with enhanced camera parameter extraction and segmentation masks"""
         try:
-            # Get base observation
-            base_obs = self.collect_diff_data() if hasattr(self, 'collect_diff_data') else {}
+            # Get base observation - use original method if available to avoid recursion
+            if hasattr(self, '_original_collect_diff_data'):
+                base_obs = self._original_collect_diff_data()
+            elif hasattr(self, 'collect_diff_data'):
+                base_obs = self.collect_diff_data()
+            else:
+                base_obs = {}
             
             # Collect camera images with parameters and segmentation masks
             rgb_images, depth_images, segmentation_masks, camera_intrinsics, camera_extrinsics, camera_info = collect_camera_images(self, debug=debug)

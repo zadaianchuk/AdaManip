@@ -118,23 +118,44 @@ class OpenCoffeeMachineManipulation(BaseManipulation) :
         for eps in range(eps_num):
             eps_buffer = [Episode_Buffer() for _ in range(self.env.num_envs)]
             done_flag = [False] * self.env.num_envs
-            print("eps_{}".format(eps+1))
+            print("\n=== Starting Episode {} ===".format(eps+1))
             self.env.reset()
+            
+            # Debug initial hand position
             pre_pose = self.env.adjust_hand_pose.clone()
+            print(f"Initial hand position: {pre_pose[0, :3].cpu().numpy()}")
             pre_pose[:, 2] += self.env.gripper_length*2
+            print(f"Moving up to: {pre_pose[0, :3].cpu().numpy()}")
+            
             for i in range(3):
                 for j in range(10):
                     self.env.step(pre_pose)
+                    if j == 0:  # Print only first step of each iteration
+                        print(f"Step {i*10 + j}: Hand position: {self.env.hand_rigid_body_tensor[0, :3].cpu().numpy()}")
+            
             pre_pose[:, 2] -= self.env.gripper_length + 0.008
+            print(f"Moving down to: {pre_pose[0, :3].cpu().numpy()}")
+            
             for i in range(3):
                 for j in range(10):
                     self.env.step(pre_pose)
+                    if j == 0:  # Print only first step of each iteration
+                        print(f"Step {i*10 + j}: Hand position: {self.env.hand_rigid_body_tensor[0, :3].cpu().numpy()}")
+            
             hand_pose = self.env.hand_rigid_body_tensor[:,:7]
+            print(f"Final hand pose before gripper: {hand_pose[0, :3].cpu().numpy()}")
+            
             self.env.gripper = True
+            print("Closing gripper...")
             for i in range(10):
                 self.env.step(hand_pose)
+                if i == 0 or i == 9:  # Print first and last step
+                    print(f"Gripper step {i}: Hand position: {self.env.hand_rigid_body_tensor[0, :3].cpu().numpy()}")
+            
             init_actions = self.action_process(hand_pose)
             self.env.actions = init_actions
+            print("=== Starting manipulation phase ===")
+            
             ####################start collect manipulation data############
             step_size = 0.035
             open_size = 0.015
@@ -143,44 +164,71 @@ class OpenCoffeeMachineManipulation(BaseManipulation) :
             rotate_dir = quat_axis(handle_quat, axis=0)
             down_q = torch.stack(self.env.num_envs * [torch.tensor([0, -0.7071068, 0.7071068, 0])]).to(self.env.device).view((self.env.num_envs, 4))
             rotate_dof = self.env.two_dof_tensor[:,0]
+            
+            print(f"Initial rotate_dof: {rotate_dof[0].cpu().numpy()}")
+            print(f"Initial handle quaternion: {handle_quat[0].cpu().numpy()}")
+            
             for t in range(max_step):
+                print(f"\n--- Step {t} ---")
                 cur_p = hand_pose[:,:3]
                 pre_p = cur_p.clone()
+                
+                print(f"Current hand position: {cur_p[0].cpu().numpy()}")
+                print(f"Current rotate_dof: {rotate_dof[0].cpu().numpy()}")
 
                 for i in range(self.env.num_envs):
+                    if done_flag[i]:
+                        print(f"Env {i} already done, skipping")
+                        continue
+                        
                     if policy == "succ":
                         res = self.succ_policy(i)
                     elif policy == "adaptive":
                         res = self.ada_policy(i, t, rotate_dof[i])
                     else:
                         raise NotImplementedError
+                        
+                    print(f"Env {i} policy result: {res}")
+                    
                     if res == 'z':
                         pre_p[i, 2] -= open_size
+                        print(f"Moving down by {open_size}")
                     elif res == 'r':
                         pre_p[i] -= rotate_dir[i] * step_size
+                        print(f"Rotating by {step_size}")
                     else:
                         raise NotImplementedError
 
                     pre_q = quat_mul(handle_quat, down_q)
                 pre_pose = torch.cat([pre_p, pre_q], dim=-1)
                 gt_pose = self.action_process(pre_pose)
+                
+                print(f"Target pose: {pre_pose[0, :3].cpu().numpy()}")
 
                 for env_id in range(self.env.num_envs):
                     if not done_flag[env_id]:
                         obs = self.env.collect_single_diff_data(env_id)
                         pc, env_state = obs_wrapper(obs)
                         eps_buffer[env_id].add(pc, env_state, gt_pose[env_id])
+                
                 for j in range(15):
                     self.env.step(pre_pose)
+                    if j == 0 or j == 14:  # Print first and last step
+                        print(f"Action step {j}: Hand position: {self.env.hand_rigid_body_tensor[0, :3].cpu().numpy()}")
+                        print(f"Action step {j}: rotate_dof: {self.env.two_dof_tensor[0, 0].cpu().numpy()}")
+                
                 self.env.actions = gt_pose
+                
                 # update done_flag
                 for env_id in range(self.env.num_envs):
                     if (torch.abs(self.env.one_dof_tensor[env_id, 0]) > 0.035).cpu().item() and not done_flag[env_id]:
                         demo_buffer.append(eps_buffer[env_id])
                         done_flag[env_id] = True
                         succ_cnt[env_id] += 1
-                        print(f"Env {env_id} Succeeded")
-            print(succ_cnt)
+                        print(f"Env {env_id} Succeeded! Final rotate_dof: {self.env.one_dof_tensor[env_id, 0].cpu().numpy()}")
+            
+            print(f"\n=== Episode {eps+1} Complete ===")
+            print(f"Success counts: {succ_cnt}")
 
         if self.cfg['env']['collectData']:
             dataset_path = "manip_cm_" + self.cfg["task"]["policy"] + "_" + str(self.cfg["env"]["asset"]["AssetNum"]) + "_eps" + str(eps_num)+ "_clock" + str(self.cfg["env"]["clockwise"]) 
@@ -189,7 +237,6 @@ class OpenCoffeeMachineManipulation(BaseManipulation) :
             os.makedirs(save_dir, exist_ok=True)
             demo_buffer.save(save_path)   
 
-    
     '''
     test model
     '''
